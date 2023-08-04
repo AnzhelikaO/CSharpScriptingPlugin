@@ -35,9 +35,9 @@ public record Globals
     [PublicAPI]public static TSPlayer all => TSPlayer.All;
     [PublicAPI]public static TSPlayer server => TSPlayer.Server;
 
-    public static readonly AsValuesArray varr = new();
-    public static readonly AsValuesList vlist = new();
-    public static readonly AsValuesTuple vtuple = new();
+    [PublicAPI]public static readonly AsValuesArray varr = new();
+    [PublicAPI]public static readonly AsValuesList vlist = new();
+    [PublicAPI]public static readonly AsValuesTuple vtuple = new();
 
     [PublicAPI]public readonly DynamicDictionary kv = new();
 

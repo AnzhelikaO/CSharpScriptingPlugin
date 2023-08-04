@@ -1,7 +1,9 @@
 ﻿#region Using
 
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Scripting;
@@ -103,26 +105,101 @@ public class CodeManager
     
     #endregion
     #region Options
-
-    protected static readonly ScriptOptions DefaultOptions =
-        ScriptOptions.Default.WithLanguageVersion(LanguageVersion.Latest)
-                             .AddReferences(AppDomain.CurrentDomain.GetAssemblies())
-                             .AddImports("System",
-                                         "System.Collections",
-                                         "System.Collections.Concurrent",
-                                         "System.Collections.Generic",
-                                         "System.Collections.ObjectModel",
-                                         "System.Diagnostics.CodeAnalysis",
-                                         "System.IO",
-                                         "System.IO.Compression",
-                                         "System.Linq",
-                                         "System.Reflection",
-                                         "System.Text",
-                                         "System.Text.RegularExpressions",
-                                         "Terraria",
-                                         "Terraria.DataStructures",
-                                         "Terraria.GameContent.Tile_Entities",
-                                         "Terraria.ID");
+    
+    private static ScriptOptions? _DefaultOptions;
+    protected static ScriptOptions DefaultOptions
+    {
+        get
+        {
+            if (_DefaultOptions is null)
+            {
+                Debugger.Launch();
+                string dir = AppDomain.CurrentDomain.BaseDirectory;
+                _DefaultOptions =
+                    ScriptOptions.Default
+                                 .WithLanguageVersion(LanguageVersion.Latest)
+                                 .WithMetadataResolver(
+                                     ScriptMetadataResolver.Default
+                                                           .WithBaseDirectory(dir)
+                                                           .WithSearchPaths(
+                                                               Path.Combine(dir, "bin"),
+                                                               Path.Combine(dir, "ServerPlugins")));
+                                 //.WithReferences(typeof(System.Int32).Assembly,
+                                 //                typeof(System.Collections.BitArray).Assembly,
+                                 //                typeof(TerrariaApi.Server.ApiVersionAttribute).Assembly,
+                                 //                typeof(Terraria.Main).Assembly,
+                                 //                typeof(System.Linq.Enumerable).Assembly,
+                                 //                typeof(System.Collections.Immutable.ImmutableList).Assembly,
+                                 //                typeof(System.Timers.Timer).Assembly,
+                                 //                typeof(System.Console).Assembly,
+                                 //                typeof(System.Collections.Concurrent.ConcurrentBag<System.Int32>).Assembly,
+                                 //                typeof(Newtonsoft.Json.JsonConvert).Assembly,
+                                 //                typeof(System.Net.Sockets.TcpClient).Assembly,
+                                 //                typeof(On.Terraria.Main).Assembly,
+                                 //                typeof(System.Diagnostics.Process).Assembly,
+                                 //                typeof(System.Collections.CaseInsensitiveComparer).Assembly,
+                                 //                typeof(System.Diagnostics.FileVersionInfo).Assembly,
+                                 //                typeof(System.Buffers.Text.Base64).Assembly,
+                                 //                typeof(System.Text.RegularExpressions.Regex).Assembly,
+                                 //                typeof(System.Uri).Assembly,
+                                 //                typeof(System.Collections.ObjectModel.ObservableCollection<System.Int32>).Assembly,
+                                 //                typeof(System.Data.IDbConnection).Assembly,
+                                 //                typeof(CSharpScriptingPlugin.Configuration.Globals).Assembly,
+                                 //                typeof(System.Collections.Immutable.ImmutableArray).Assembly,
+                                 //                typeof(Microsoft.CodeAnalysis.Scripting.ScriptOptions).Assembly,
+                                 //                typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly,
+                                 //                typeof(MySql.Data.MySqlClient.MySqlConnection).Assembly,
+                                 //                typeof(System.Net.Http.HttpClient).Assembly);
+                HashSet<string> errors = new();
+                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    ScriptOptions options;
+                    try
+                    {
+                        Type t = assembly.GetType();
+                        Console.WriteLine(t);
+                        options = _DefaultOptions.AddReferences(assembly);
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine(assembly.FullName);
+                        Type[] types = assembly.GetTypes().Where(t => t.IsPublic).ToArray();
+                        if (types.Any())
+                            Console.WriteLine(types);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine(assembly.FullName);
+                        string msg = ex.ToString();
+                        if (errors.Add(msg))
+                            Console.WriteLine(msg);
+                        Type[] types = assembly.GetTypes().Where(t => t.IsPublic).ToArray();
+                        if (types.Any())
+                            Console.WriteLine(types);
+                        continue;
+                    }
+                    _DefaultOptions = options;
+                }
+                Console.ResetColor();
+                _DefaultOptions = _DefaultOptions.AddImports("System",
+                                                             "System.Collections",
+                                                             "System.Collections.Concurrent",
+                                                             "System.Collections.Generic",
+                                                             "System.Collections.ObjectModel",
+                                                             "System.Diagnostics.CodeAnalysis",
+                                                             "System.IO",
+                                                             "System.IO.Compression",
+                                                             "System.Linq",
+                                                             "System.Reflection",
+                                                             "System.Text",
+                                                             "System.Text.RegularExpressions",
+                                                             "Terraria",
+                                                             "Terraria.DataStructures",
+                                                             "Terraria.GameContent.Tile_Entities",
+                                                             "Terraria.ID");
+            }
+            return _DefaultOptions;
+        }
+    }
     private ScriptOptions _Options = DefaultOptions;
     [AllowNull]
     public ScriptOptions Options

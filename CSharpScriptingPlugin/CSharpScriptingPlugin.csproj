@@ -9,6 +9,7 @@
     <Authors>Anzhelika</Authors>
     <Product>$(AssemblyName) by $(Authors)</Product>
     <Copyright>Copyright © $(Authors) 2023</Copyright>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

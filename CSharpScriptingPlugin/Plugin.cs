@@ -14,16 +14,22 @@ namespace CSharpScriptingPlugin.Plugin;
 [PublicAPI]
 public sealed class Plugin : TerrariaPlugin
 {
+    public override string Name => nameof(CSharpScriptingPlugin);
+    public override string Author => "Anzhelika and ASgo";
+    public override Version Version => new(1, 0);
+    public override string Description => "Provides C# scripting in chat or console.";
     public Plugin(Main Game) : base(Game) { }
 
-    #region Initialize
+    #region [OnPost]Initialize
 
     public override void Initialize()
     {
-        CodeManager.Manager?.Initialize();
+        ServerApi.Hooks.GamePostInitialize.Register(this, OnPostInitialize);
         ServerApi.Hooks.ServerChat.Register(this, OnServerChat);
         ServerApi.Hooks.ServerCommand.Register(this, OnServerCommand);
     }
+    private void OnPostInitialize(EventArgs Args) =>
+        CodeManager.Manager?.Initialize();
 
     #endregion
     #region Dispose
@@ -32,6 +38,7 @@ public sealed class Plugin : TerrariaPlugin
     {
         if (Disposing)
         {
+            ServerApi.Hooks.GamePostInitialize.Deregister(this, OnPostInitialize);
             ServerApi.Hooks.ServerChat.Deregister(this, OnServerChat);
             ServerApi.Hooks.ServerCommand.Deregister(this, OnServerCommand);
         }
