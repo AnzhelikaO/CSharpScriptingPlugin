@@ -137,7 +137,9 @@ public sealed class DynamicDictionary
                                ? InnerDictionary
                                : InnerDictionary.Where(p => (Index - p.Value.Index) <= 10))
                           .OrderBy(p => p.Value.Index)
-                          .Select(p => $"[{p.Value.Index}] {ToStringNull(p.Key)}={ToStringNull(p.Value)}"));
+                          .Select(Show));
+    private static string Show(KeyValuePair<dynamic, Val> Pair) =>
+        $"[{Pair.Value.Index}] {ToStringNull(Pair.Key)}={ToStringNull(Pair.Value.Value)}";
 
     #endregion
     #region ToString

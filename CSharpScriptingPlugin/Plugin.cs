@@ -45,7 +45,7 @@ public sealed class Plugin : TerrariaPlugin
     public override string Description => MyAssemblyInfo.Description;
     #region .Constructor
 
-    public Plugin(Main Game) : base(Game) { Console.WriteLine(Description); }
+    public Plugin(Main Game) : base(Game) { }
 
     #endregion
 
