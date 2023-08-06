@@ -10,11 +10,10 @@ public record Globals
 {
     #region me
     
-    internal TSPlayer? _me;
+    internal TSPlayer _me;
     public TSPlayer me
     {
-        get => (_me ?? throw new InvalidOperationException(
-                            $"Property '{nameof(me)}' was not initialized."));
+        get => _me;
         set
         {
             ArgumentNullException.ThrowIfNull(value);
@@ -40,6 +39,16 @@ public record Globals
     [PublicAPI]public static readonly AsValuesTuple vtuple = new();
 
     [PublicAPI]public readonly DynamicDictionary kv = new();
+    [PublicAPI]public dynamic? a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z;
+    #region .Constructor
+    
+    public Globals(TSPlayer Me)
+    {
+        ArgumentNullException.ThrowIfNull(Me);
+        _me = Me;
+    }
+
+    #endregion
 
     #region cw
 
@@ -53,10 +62,10 @@ public record Globals
     #endregion
     #region GetReceivers
 
-    protected HashSet<TSPlayer> GetReceivers(IEnumerable<object?>? Receivers)
+    protected HashSet<TSPlayer> GetReceivers(object?[]? Receivers)
     {
         HashSet<TSPlayer> receivers = new() { me };
-        if (Receivers is null)
+        if ((Receivers is null) || !Receivers.Any())
             return receivers;
         
         foreach (object? _receiver in Receivers)

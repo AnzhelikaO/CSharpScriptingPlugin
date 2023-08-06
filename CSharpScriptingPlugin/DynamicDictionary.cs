@@ -134,10 +134,10 @@ public sealed class DynamicDictionary
     public string s(bool All = false) => Show(All);
     public string Show(bool All = false) =>
         string.Join("\n", (All
-                               ? InnerDictionary.Values
-                               : InnerDictionary.Values.Where(v => (Index - v.Index) <= 10))
-                          .OrderBy(v => v.Index)
-                          .Select(v => $"[{v.Index}] {ToStringNull(v.Value)}"));
+                               ? InnerDictionary
+                               : InnerDictionary.Where(p => (Index - p.Value.Index) <= 10))
+                          .OrderBy(p => p.Value.Index)
+                          .Select(p => $"[{p.Value.Index}] {ToStringNull(p.Key)}={ToStringNull(p.Value)}"));
 
     #endregion
     #region ToString

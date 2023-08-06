@@ -1,12 +1,12 @@
 ﻿#region Using
 
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis.Scripting;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using Microsoft.CodeAnalysis.CSharp.Scripting;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.Scripting;
 using TShockAPI;
 
 #endregion
@@ -14,6 +14,7 @@ namespace CSharpScriptingPlugin;
 
 public class CodeManager
 {
+    public const string PLAYER_DATA_KEY = $"{nameof(CSharpScriptingPlugin)}_Data";
     #region Manager
     
     private static CodeManager? _Manager = new();
@@ -102,10 +103,10 @@ public class CodeManager
         Prefixes.Where(p => !string.IsNullOrWhiteSpace(p))
                 .Distinct()
                 .Select(p => p.ToLower());
-    
+
     #endregion
     #region Options
-    
+
     private static ScriptOptions? _DefaultOptions;
     protected static ScriptOptions DefaultOptions
     {
@@ -113,89 +114,38 @@ public class CodeManager
         {
             if (_DefaultOptions is null)
             {
-                Debugger.Launch();
+                Assembly[] neededAssemblies = AppDomain.CurrentDomain
+                                                       .GetAssemblies()
+                                                       .Where(a => !a.IsDynamic)
+                                                       .ToArray();
                 string dir = AppDomain.CurrentDomain.BaseDirectory;
                 _DefaultOptions =
                     ScriptOptions.Default
                                  .WithLanguageVersion(LanguageVersion.Latest)
-                                 .WithMetadataResolver(
-                                     ScriptMetadataResolver.Default
-                                                           .WithBaseDirectory(dir)
-                                                           .WithSearchPaths(
-                                                               Path.Combine(dir, "bin"),
-                                                               Path.Combine(dir, "ServerPlugins")));
-                                 //.WithReferences(typeof(System.Int32).Assembly,
-                                 //                typeof(System.Collections.BitArray).Assembly,
-                                 //                typeof(TerrariaApi.Server.ApiVersionAttribute).Assembly,
-                                 //                typeof(Terraria.Main).Assembly,
-                                 //                typeof(System.Linq.Enumerable).Assembly,
-                                 //                typeof(System.Collections.Immutable.ImmutableList).Assembly,
-                                 //                typeof(System.Timers.Timer).Assembly,
-                                 //                typeof(System.Console).Assembly,
-                                 //                typeof(System.Collections.Concurrent.ConcurrentBag<System.Int32>).Assembly,
-                                 //                typeof(Newtonsoft.Json.JsonConvert).Assembly,
-                                 //                typeof(System.Net.Sockets.TcpClient).Assembly,
-                                 //                typeof(On.Terraria.Main).Assembly,
-                                 //                typeof(System.Diagnostics.Process).Assembly,
-                                 //                typeof(System.Collections.CaseInsensitiveComparer).Assembly,
-                                 //                typeof(System.Diagnostics.FileVersionInfo).Assembly,
-                                 //                typeof(System.Buffers.Text.Base64).Assembly,
-                                 //                typeof(System.Text.RegularExpressions.Regex).Assembly,
-                                 //                typeof(System.Uri).Assembly,
-                                 //                typeof(System.Collections.ObjectModel.ObservableCollection<System.Int32>).Assembly,
-                                 //                typeof(System.Data.IDbConnection).Assembly,
-                                 //                typeof(CSharpScriptingPlugin.Configuration.Globals).Assembly,
-                                 //                typeof(System.Collections.Immutable.ImmutableArray).Assembly,
-                                 //                typeof(Microsoft.CodeAnalysis.Scripting.ScriptOptions).Assembly,
-                                 //                typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly,
-                                 //                typeof(MySql.Data.MySqlClient.MySqlConnection).Assembly,
-                                 //                typeof(System.Net.Http.HttpClient).Assembly);
-                HashSet<string> errors = new();
-                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    ScriptOptions options;
-                    try
-                    {
-                        Type t = assembly.GetType();
-                        Console.WriteLine(t);
-                        options = _DefaultOptions.AddReferences(assembly);
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine(assembly.FullName);
-                        Type[] types = assembly.GetTypes().Where(t => t.IsPublic).ToArray();
-                        if (types.Any())
-                            Console.WriteLine(types);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine(assembly.FullName);
-                        string msg = ex.ToString();
-                        if (errors.Add(msg))
-                            Console.WriteLine(msg);
-                        Type[] types = assembly.GetTypes().Where(t => t.IsPublic).ToArray();
-                        if (types.Any())
-                            Console.WriteLine(types);
-                        continue;
-                    }
-                    _DefaultOptions = options;
-                }
-                Console.ResetColor();
-                _DefaultOptions = _DefaultOptions.AddImports("System",
-                                                             "System.Collections",
-                                                             "System.Collections.Concurrent",
-                                                             "System.Collections.Generic",
-                                                             "System.Collections.ObjectModel",
-                                                             "System.Diagnostics.CodeAnalysis",
-                                                             "System.IO",
-                                                             "System.IO.Compression",
-                                                             "System.Linq",
-                                                             "System.Reflection",
-                                                             "System.Text",
-                                                             "System.Text.RegularExpressions",
-                                                             "Terraria",
-                                                             "Terraria.DataStructures",
-                                                             "Terraria.GameContent.Tile_Entities",
-                                                             "Terraria.ID");
+                                 .WithAllowUnsafe(false)
+                                 .AddReferences(neededAssemblies
+                                                    .Where(a => !string.IsNullOrWhiteSpace(a.Location)))
+                                 .AddReferences(neededAssemblies
+                                                .Where(a => string.IsNullOrWhiteSpace(a.Location))
+                                                .Select(a =>
+                                                {
+                                                    if (!string.IsNullOrWhiteSpace(a.Location)
+                                                     || (a.GetName().Name is not string name))
+                                                        return null;
+
+                                                    name = $"{name}.dll";
+                                                    if (new[]
+                                                    {
+                                                        Path.Combine(dir, name),
+                                                        Path.Combine(dir, "bin", name),
+                                                        Path.Combine(dir, "ServerPlugins", name)
+                                                    }.FirstOrDefault(f => File.Exists(f)) is not string file)
+                                                        return null;
+                                                    using FileStream fs = File.OpenRead(file);
+                                                    return MetadataReference.CreateFromStream(fs);
+                                                })
+                                                .Where(r => (r is not null)))
+                                 .AddImports(GetNeededUsings());
             }
             return _DefaultOptions;
         }
@@ -207,6 +157,79 @@ public class CodeManager
         get => _Options;
         set => _Options = (value ?? DefaultOptions);
     }
+
+    #region GetNeededTypes
+    // ReSharper disable BuiltInTypeReferenceStyle
+    // ReSharper disable RedundantNameQualifier
+#pragma warning disable IDE0001, IDE0049 // simplify name
+
+    private static IEnumerable<Type> GetNeededTypes()
+    {
+        yield return typeof(System.Int32);
+        yield return typeof(System.Console);
+        yield return typeof(System.Linq.Enumerable);
+
+        yield return typeof(TShockAPI.TShock);
+        yield return typeof(Terraria.Main);
+        yield return typeof(On.Terraria.Main);
+        yield return typeof(TerrariaApi.Server.ApiVersionAttribute);
+
+        yield return typeof(Microsoft.CodeAnalysis.Scripting.ScriptOptions);
+        yield return typeof(CSharpScriptingPlugin.Configuration.Globals);
+
+        yield return typeof(Newtonsoft.Json.JsonConvert);
+        yield return typeof(System.Text.RegularExpressions.Regex);
+
+        yield return typeof(System.Collections.BitArray);
+        yield return typeof(System.Collections.Immutable.ImmutableList);
+        yield return typeof(System.Collections.ObjectModel.ObservableCollection<int>);
+        yield return typeof(System.Collections.Immutable.ImmutableArray);
+        yield return typeof(System.Collections.Concurrent.ConcurrentBag<int>);
+        yield return typeof(System.Collections.CaseInsensitiveComparer);
+
+        yield return typeof(System.Timers.Timer);
+        yield return typeof(System.Diagnostics.Process);
+        yield return typeof(System.Diagnostics.FileVersionInfo);
+        yield return typeof(System.Uri);
+        yield return typeof(System.IO.Compression.GZipStream);
+
+        yield return typeof(System.Data.IDbConnection);
+        yield return typeof(Microsoft.Data.Sqlite.SqliteConnection);
+        yield return typeof(MySql.Data.MySqlClient.MySqlConnection);
+
+        yield return typeof(System.Net.Sockets.TcpClient);
+        yield return typeof(System.Net.Http.HttpClient);
+    }
+
+#pragma warning restore IDE0001, IDE0049
+    // ReSharper restore RedundantNameQualifier
+    // ReSharper restore BuiltInTypeReferenceStyle
+    #endregion
+    #region GetNeededUsings
+
+    private static IEnumerable<string> GetNeededUsings()
+    {
+        yield return "System";
+        yield return "System.Collections";
+        yield return "System.Collections.Concurrent";
+        yield return "System.Collections.Generic";
+        yield return "System.Collections.ObjectModel";
+        yield return "System.Diagnostics.CodeAnalysis";
+        yield return "System.IO";
+        yield return "System.IO.Compression";
+        yield return "System.Linq";
+        yield return "System.Reflection";
+        yield return "System.Text";
+        yield return "System.Text.RegularExpressions";
+        yield return "Terraria";
+        yield return "Terraria.DataStructures";
+        yield return "Terraria.GameContent.Tile_Entities";
+        yield return "Terraria.ID";
+        yield return "TShockAPI";
+        yield return "CSharpScriptingPlugin";
+    }
+
+    #endregion
 
     #endregion
 
@@ -231,11 +254,16 @@ public class CodeManager
     public Globals GetGlobals(TSPlayer Sender)
     {
         ArgumentNullException.ThrowIfNull(Sender);
-        Globals globals = (GetGlobalsInner(Sender) ?? new());
-        return (globals with { me = globals._me ?? Sender });
+        return (GetGlobalsInner(Sender) ?? _GetGlobals(Sender));
     }
     [return: MaybeNull]
-    protected virtual Globals GetGlobalsInner(TSPlayer Sender) => new();
+    protected virtual Globals GetGlobalsInner(TSPlayer Sender) => _GetGlobals(Sender);
+    private static Globals _GetGlobals(TSPlayer Sender)
+    {
+        if (!Sender.ContainsData(PLAYER_DATA_KEY))
+            Sender.SetData(PLAYER_DATA_KEY, new Globals(Sender));
+        return Sender.GetData<Globals>(PLAYER_DATA_KEY);
+    }
 
     // ReSharper restore UseNullableAnnotationInsteadOfAttribute
     #endregion
