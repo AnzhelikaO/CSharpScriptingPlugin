@@ -135,17 +135,35 @@ public class CodeManager
 
                                                     name = $"{name}.dll";
                                                     if (new[]
-                                                    {
-                                                        Path.Combine(dir, name),
-                                                        Path.Combine(dir, "bin", name),
-                                                        Path.Combine(dir, "ServerPlugins", name)
-                                                    }.FirstOrDefault(f => File.Exists(f)) is not string file)
+                                                        {
+                                                            Path.Combine(dir, name),
+                                                            Path.Combine(dir, "bin", name),
+                                                            Path.Combine(dir, "ServerPlugins", name)
+                                                        }.FirstOrDefault(f => File.Exists(f)) is not string
+                                                        file)
                                                         return null;
                                                     using FileStream fs = File.OpenRead(file);
                                                     return MetadataReference.CreateFromStream(fs);
                                                 })
                                                 .Where(r => (r is not null)))
-                                 .AddImports(GetNeededUsings());
+                                 .AddImports("System",
+                                             "System.Collections",
+                                             "System.Collections.Concurrent",
+                                             "System.Collections.Generic",
+                                             "System.Collections.ObjectModel",
+                                             "System.Diagnostics.CodeAnalysis",
+                                             "System.IO",
+                                             "System.IO.Compression",
+                                             "System.Linq",
+                                             "System.Reflection",
+                                             "System.Text",
+                                             "System.Text.RegularExpressions",
+                                             "Terraria",
+                                             "Terraria.DataStructures",
+                                             "Terraria.GameContent.Tile_Entities",
+                                             "Terraria.ID",
+                                             "TShockAPI",
+                                             "CSharpScriptingPlugin");
             }
             return _DefaultOptions;
         }
@@ -157,79 +175,6 @@ public class CodeManager
         get => _Options;
         set => _Options = (value ?? DefaultOptions);
     }
-
-    #region GetNeededTypes
-    // ReSharper disable BuiltInTypeReferenceStyle
-    // ReSharper disable RedundantNameQualifier
-#pragma warning disable IDE0001, IDE0049 // simplify name
-
-    private static IEnumerable<Type> GetNeededTypes()
-    {
-        yield return typeof(System.Int32);
-        yield return typeof(System.Console);
-        yield return typeof(System.Linq.Enumerable);
-
-        yield return typeof(TShockAPI.TShock);
-        yield return typeof(Terraria.Main);
-        yield return typeof(On.Terraria.Main);
-        yield return typeof(TerrariaApi.Server.ApiVersionAttribute);
-
-        yield return typeof(Microsoft.CodeAnalysis.Scripting.ScriptOptions);
-        yield return typeof(CSharpScriptingPlugin.Configuration.Globals);
-
-        yield return typeof(Newtonsoft.Json.JsonConvert);
-        yield return typeof(System.Text.RegularExpressions.Regex);
-
-        yield return typeof(System.Collections.BitArray);
-        yield return typeof(System.Collections.Immutable.ImmutableList);
-        yield return typeof(System.Collections.ObjectModel.ObservableCollection<int>);
-        yield return typeof(System.Collections.Immutable.ImmutableArray);
-        yield return typeof(System.Collections.Concurrent.ConcurrentBag<int>);
-        yield return typeof(System.Collections.CaseInsensitiveComparer);
-
-        yield return typeof(System.Timers.Timer);
-        yield return typeof(System.Diagnostics.Process);
-        yield return typeof(System.Diagnostics.FileVersionInfo);
-        yield return typeof(System.Uri);
-        yield return typeof(System.IO.Compression.GZipStream);
-
-        yield return typeof(System.Data.IDbConnection);
-        yield return typeof(Microsoft.Data.Sqlite.SqliteConnection);
-        yield return typeof(MySql.Data.MySqlClient.MySqlConnection);
-
-        yield return typeof(System.Net.Sockets.TcpClient);
-        yield return typeof(System.Net.Http.HttpClient);
-    }
-
-#pragma warning restore IDE0001, IDE0049
-    // ReSharper restore RedundantNameQualifier
-    // ReSharper restore BuiltInTypeReferenceStyle
-    #endregion
-    #region GetNeededUsings
-
-    private static IEnumerable<string> GetNeededUsings()
-    {
-        yield return "System";
-        yield return "System.Collections";
-        yield return "System.Collections.Concurrent";
-        yield return "System.Collections.Generic";
-        yield return "System.Collections.ObjectModel";
-        yield return "System.Diagnostics.CodeAnalysis";
-        yield return "System.IO";
-        yield return "System.IO.Compression";
-        yield return "System.Linq";
-        yield return "System.Reflection";
-        yield return "System.Text";
-        yield return "System.Text.RegularExpressions";
-        yield return "Terraria";
-        yield return "Terraria.DataStructures";
-        yield return "Terraria.GameContent.Tile_Entities";
-        yield return "Terraria.ID";
-        yield return "TShockAPI";
-        yield return "CSharpScriptingPlugin";
-    }
-
-    #endregion
 
     #endregion
 

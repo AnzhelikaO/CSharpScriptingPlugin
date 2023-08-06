@@ -6,9 +6,10 @@
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
     <Title></Title>
-    <Authors>Anzhelika</Authors>
+    <Authors>Anzhelika and ASgo</Authors>
     <Product>$(AssemblyName) by $(Authors)</Product>
     <Copyright>Copyright © $(Authors) 2023</Copyright>
+    <Description>Provides C# scripting in chat and console.</Description>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 

@@ -3,6 +3,8 @@
 global using CSharpScriptingPlugin.Configuration;
 global using JetBrains.Annotations;
 global using static CSharpScriptingPlugin.Configuration.Helpers;
+using System.Diagnostics;
+using System.Reflection;
 using Terraria;
 using TerrariaApi.Server;
 using TShockAPI;
@@ -14,11 +16,38 @@ namespace CSharpScriptingPlugin.Plugin;
 [PublicAPI]
 public sealed class Plugin : TerrariaPlugin
 {
-    public override string Name => nameof(CSharpScriptingPlugin);
-    public override string Author => "Anzhelika and ASgo";
-    public override Version Version => new(1, 0);
-    public override string Description => "Provides C# scripting in chat or console.";
-    public Plugin(Main Game) : base(Game) { }
+    #region [My]AssemblyInfo
+
+    private sealed record AssemblyInfo(string Name, string Author, Version Version, string Description);
+
+    private AssemblyInfo? _MyAssemblyInfo;
+    private AssemblyInfo MyAssemblyInfo
+    {
+        get
+        {
+            if (_MyAssemblyInfo is null)
+            {
+                Assembly assembly = Assembly.GetExecutingAssembly();
+                _MyAssemblyInfo =
+                    new(assembly.GetCustomAttribute<AssemblyTitleAttribute>()!.Title,
+                        assembly.GetCustomAttribute<AssemblyCompanyAttribute>()!.Company,
+                        Version.Parse(assembly.GetCustomAttribute<AssemblyFileVersionAttribute>()!.Version),
+                        assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()!.Description);
+            }
+            return _MyAssemblyInfo;
+        }
+    }
+
+    #endregion
+    public override string Name => MyAssemblyInfo.Name;
+    public override string Author => MyAssemblyInfo.Author;
+    public override Version Version => MyAssemblyInfo.Version;
+    public override string Description => MyAssemblyInfo.Description;
+    #region .Constructor
+
+    public Plugin(Main Game) : base(Game) { Console.WriteLine(Description); }
+
+    #endregion
 
     #region [OnPost]Initialize
 
