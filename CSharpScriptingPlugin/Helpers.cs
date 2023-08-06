@@ -11,8 +11,7 @@ internal static class Helpers
 {
     #region ToStringNull
 
-    public static string ToStringNull(object? Object) =>
-        ((Object is null) ? "<NULL>" : $"{{ {Object} }}");
+    public static string ToStringNull(object? Object) => (Object?.ToString() ?? "<NULL>");
 
     #endregion
     #region CreateValueTuple

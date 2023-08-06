@@ -4,7 +4,9 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+using Microsoft.Xna.Framework;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using TShockAPI;
@@ -81,10 +83,29 @@ public class CodeManager
     }
 
     #endregion
+    #region SignaturePrefix
+
+    protected const string DEFAULT_SIGNATURE_PREFIX = ";=";
+    private string _SignaturePrefix = DEFAULT_SIGNATURE_PREFIX;
+    [AllowNull]
+    public string SignaturePrefix
+    {
+        get { lock (DefaultOptions) return _SignaturePrefix; }
+        set
+        {
+            lock (DefaultOptions)
+            {
+                _SignaturePrefix = (value ?? DEFAULT_SIGNATURE_PREFIX);
+                UpdateDefaultPrefixes();
+            }
+        }
+    }
+
+    #endregion
     #region Prefixes
 
     protected ReadOnlyCollection<string> DefaultPrefixes { get; private set; } =
-        new(new[] { DEFAULT_SHOW_PREFIX, DEFAULT_EXECUTE_PREFIX });
+        new(new[] { DEFAULT_SHOW_PREFIX, DEFAULT_SIGNATURE_PREFIX, DEFAULT_EXECUTE_PREFIX });
     protected virtual IEnumerable<string> PrefixesInner => DefaultPrefixes;
     protected IEnumerable<string> Prefixes
     {
@@ -98,11 +119,12 @@ public class CodeManager
     }
     
     private void UpdateDefaultPrefixes() =>
-        DefaultPrefixes = new(GetPrefixes(new[] { _ExecutePrefix, _ShowPrefix }).ToArray());
+        DefaultPrefixes = new(GetPrefixes(new[] { _ExecutePrefix, _ShowPrefix, _SignaturePrefix }).ToArray());
     private static IEnumerable<string> GetPrefixes(IEnumerable<string> Prefixes) =>
         Prefixes.Where(p => !string.IsNullOrWhiteSpace(p))
                 .Distinct()
-                .Select(p => p.ToLower());
+                .Select(p => p.ToLower())
+                .OrderByDescending(p => p.Length);
 
     #endregion
     #region Options
@@ -225,8 +247,6 @@ public class CodeManager
         Input = Input.Trim();
         if (string.IsNullOrWhiteSpace(Input))
             return false;
-        else if ((Input[^1] != ';') && (Input[^1] != '}'))
-            Input = $"{Input};";
 
         string lowerInput = Input.ToLower();
         Prefix = Prefixes.FirstOrDefault(p => lowerInput.StartsWith(p));
@@ -248,6 +268,7 @@ public class CodeManager
         ArgumentNullException.ThrowIfNull(Code);
         try
         {
+            await ShowInput(Sender, Prefix, Code);
             return await HandleInner(Sender, Prefix, Code, Options, GetGlobals(Sender));
         }
         catch (Exception exception)
@@ -258,21 +279,40 @@ public class CodeManager
     }
 
     #endregion
+    #region ShowInput
+
+    protected virtual Task ShowInput(TSPlayer Sender, string Prefix, string Code)
+    {
+        Globals.admins.ForEach(p => p.SendMessage($"{Prefix}{Code}", Color.HotPink));
+        return Task.CompletedTask;
+    }
+
+    #endregion
     #region HandleInner
-    
+
     protected virtual async Task<bool> HandleInner(TSPlayer Sender, string Prefix, string Code,
                                                    ScriptOptions Options, Globals Globals)
     {
+        string code = $"{Code};";
         if (Prefix == ExecutePrefix)
         {
-            await CSharpScript.RunAsync(Code, Options, Globals);
+            await CSharpScript.RunAsync(code, Options, Globals);
             return true;
         }
         else if (Prefix == ShowPrefix)
         {
-            await CSharpScript.RunAsync($"return {Code}", Options, Globals)
+            await CSharpScript.RunAsync($"return {code}", Options, Globals)
                               .ContinueWith(s => Globals.cw(s.Result.ReturnValue));
             return true;
+        }
+        else if (Prefix == SignaturePrefix)
+        {
+            await CSharpScript.RunAsync($"return {code}", Options, Globals)
+                              .ContinueWith(s => s.Result
+                                                  .ReturnValue
+                                                  .GetType()
+                                                  .GetMembers()
+                                                  .ForEach(m => Globals.cw(m)));
         }
         return false;
     }

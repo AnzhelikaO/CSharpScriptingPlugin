@@ -1,5 +1,6 @@
 ﻿#region Using
 
+using Microsoft.Xna.Framework;
 using TShockAPI;
 // ReSharper disable InconsistentNaming
 
@@ -28,6 +29,7 @@ public record Globals
     public static TSPlayer[] admins =>
         TShock.Players
               .Where(p => ((p is not null) && p.HasPermission(Permissions.USE)))
+              .Append(server)
               .ToArray();
 
     #endregion
@@ -56,7 +58,7 @@ public record Globals
     {
         string text = ToStringNull(Object);
         foreach (TSPlayer receiver in GetReceivers(Receivers))
-            receiver.SendInfoMessage(text);
+            receiver.SendMessage(text, Color.HotPink);
     }
 
     #endregion
