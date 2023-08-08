@@ -7,7 +7,6 @@ global using TShockAPI;
 global using static CSharpScripting.Helpers;
 global using PublicAPIAttribute = JetBrains.Annotations.PublicAPIAttribute;
 global using UsedImplicitlyAttribute = JetBrains.Annotations.UsedImplicitlyAttribute;
-using CSharpScripting.Configuration.Prefixes;
 using System.Reflection;
 using Terraria;
 using TerrariaApi.Server;

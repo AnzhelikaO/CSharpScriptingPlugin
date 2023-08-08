@@ -7,6 +7,8 @@ using CSharpScripting.Configuration.Delegates;
 using CSharpScripting.Configuration.Prefixes;
 using CSharpScripting.Configuration.PlayerManagers;
 using System.Text.RegularExpressions;
+using Permissions = CSharpScripting.Configuration.Permissions;
+
 // ReSharper disable UseNullableAnnotationInsteadOfAttribute
 
 #endregion
@@ -146,10 +148,11 @@ public class CodeManager
 
     #region Handle[Inner]
 
-    protected internal bool Handle(TSPlayer? Sender, string Text)
+    protected internal bool Handle(TSPlayer? Sender, string Text, bool Force = false)
     {
         if ((Sender is null)
                 || string.IsNullOrWhiteSpace(Text)
+                || !Sender.HasPermission(Permissions.USE)
                 || !Prefixes.TryGet(Text, out string? showCode, out CodePrefix? codePrefix))
             return false;
 
