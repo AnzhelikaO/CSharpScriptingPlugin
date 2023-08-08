@@ -1,11 +1,10 @@
 ﻿#region Using
 
 using System.Collections;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 #endregion
-namespace CSharpScriptingPlugin.Configuration;
+namespace CSharpScripting;
 
 internal static class Helpers
 {
@@ -62,7 +61,7 @@ internal static class Helpers
     #endregion
     #region ExtractValues
 
-    public static bool ExtractValues(dynamic Value, [MaybeNullWhen(false)] out IEnumerable<dynamic?> Values)
+    public static bool ExtractValues(dynamic Value, [MaybeNullWhen(false)]out IEnumerable<dynamic?> Values)
     {
         Values = null;
         switch (Value)
@@ -81,6 +80,21 @@ internal static class Helpers
                 break;
         }
         return (Values is not null);
+    }
+
+    #endregion
+    #region ValidateConstant
+
+    public static void ValidateConstant([NotNull]ref string? Was, string Current,
+                                        [CallerArgumentExpression("Current")]string? Name = null)
+    {
+        ArgumentNullException.ThrowIfNull(Current, Name);
+        if (string.IsNullOrWhiteSpace(Current))
+            throw new ArgumentException($"Invalid {Name} \"{Current}\".");
+        if (Was is null)
+            Was = Current;
+        else if (Current != Was)
+            throw new ArgumentException($"{Name} is inconsistent: before - \"{Was}\", now - \"{Current}\".");
     }
 
     #endregion

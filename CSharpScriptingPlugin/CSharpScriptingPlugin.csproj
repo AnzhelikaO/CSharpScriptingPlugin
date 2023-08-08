@@ -11,6 +11,7 @@
     <Copyright>Copyright © $(Authors) 2023</Copyright>
     <Description>Provides C# scripting in chat and console.</Description>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <RootNamespace>$(MSBuildProjectName.Replace(" ", "_").Replace("Plugin", ""))</RootNamespace>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

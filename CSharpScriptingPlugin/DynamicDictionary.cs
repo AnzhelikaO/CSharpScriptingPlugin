@@ -1,5 +1,9 @@
-﻿// ReSharper disable InconsistentNaming
-namespace CSharpScriptingPlugin.Configuration;
+﻿#region Using
+
+using CSharpScripting.Configuration.Delegates;
+
+#endregion
+namespace CSharpScripting.Configuration;
 
 public sealed class DynamicDictionary
 {
@@ -80,12 +84,13 @@ public sealed class DynamicDictionary
     #region operator[] (Multiple keys, transform values)
 
     [PublicAPI]
-    public dynamic? this[As? As, dynamic? Key1, dynamic? Key2, params dynamic?[]? OtherKeys]
+    public dynamic? this[TransformDictionaryD? As, dynamic? Key1,
+                         dynamic? Key2, params dynamic?[]? OtherKeys]
     {
         get
         {
             Dictionary<dynamic, dynamic> dict = this[Key1, Key2, OtherKeys];
-            return ((As is null) ? dict : As.Transform(dict));
+            return ((As is null) ? dict : As(dict));
         }
     }
 
@@ -122,16 +127,7 @@ public sealed class DynamicDictionary
     #endregion
 
     #region Show
-
-    #region [Summary]
-
-    /// <summary>
-    ///     Equals to <see cref="Show"/>
-    /// </summary>
-
-    #endregion
-    [PublicAPI]
-    public string s(bool All = false) => Show(All);
+    
     public string Show(bool All = false) =>
         string.Join("\n", (All
                                ? InnerDictionary

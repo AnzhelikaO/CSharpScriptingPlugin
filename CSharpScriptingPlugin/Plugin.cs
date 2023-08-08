@@ -1,21 +1,25 @@
 ﻿#region Using
 
-global using CSharpScriptingPlugin.Configuration;
-global using JetBrains.Annotations;
-global using static CSharpScriptingPlugin.Configuration.Helpers;
-using System.Diagnostics;
+global using Microsoft.CodeAnalysis.CSharp.Scripting;
+global using Microsoft.CodeAnalysis.Scripting;
+global using System.Diagnostics.CodeAnalysis;
+global using TShockAPI;
+global using static CSharpScripting.Helpers;
+global using PublicAPIAttribute = JetBrains.Annotations.PublicAPIAttribute;
+global using UsedImplicitlyAttribute = JetBrains.Annotations.UsedImplicitlyAttribute;
+using CSharpScripting.Configuration.Prefixes;
 using System.Reflection;
 using Terraria;
 using TerrariaApi.Server;
-using TShockAPI;
 
 #endregion
-namespace CSharpScriptingPlugin.Plugin;
+namespace CSharpScripting.Plugin;
 
-[ApiVersion(2, 1)]
-[PublicAPI]
+[ApiVersion(2, 1), PublicAPI]
 public sealed class Plugin : TerrariaPlugin
 {
+    #region PluginInfo
+    
     #region [My]AssemblyInfo
 
     private sealed record AssemblyInfo(string Name, string Author, Version Version, string Description);
@@ -43,6 +47,8 @@ public sealed class Plugin : TerrariaPlugin
     public override string Author => MyAssemblyInfo.Author;
     public override Version Version => MyAssemblyInfo.Version;
     public override string Description => MyAssemblyInfo.Description;
+
+    #endregion
     #region .Constructor
 
     public Plugin(Main Game) : base(Game) { }
@@ -58,7 +64,7 @@ public sealed class Plugin : TerrariaPlugin
         ServerApi.Hooks.ServerCommand.Register(this, OnServerCommand);
     }
     private void OnPostInitialize(EventArgs Args) =>
-        CodeManager.Manager?.Initialize();
+        CodeManager.Manager.Initialize();
 
     #endregion
     #region Dispose
@@ -79,29 +85,13 @@ public sealed class Plugin : TerrariaPlugin
     #region OnServerChat
 
     private void OnServerChat(ServerChatEventArgs Args) =>
-        Args.Handled = (Args.Handled || HandleInput(TShock.Players[Args.Who], Args.Text));
+        Args.Handled = (Args.Handled || CodeManager.Manager.Handle(TShock.Players[Args.Who], Args.Text));
 
     #endregion
     #region OnServerCommand
 
     private void OnServerCommand(CommandEventArgs Args) =>
-        Args.Handled = (Args.Handled || HandleInput(TSPlayer.Server, Args.Command));
-
-    #endregion
-
-    #region HandleInput
-
-    private static bool HandleInput(TSPlayer? Sender, string Text)
-    {
-        if ((Sender is null)
-                || string.IsNullOrWhiteSpace(Text)
-                || (CodeManager.Manager is not CodeManager manager)
-                || !manager.ShouldHandle(Sender, Text, out string? prefix, out string? code))
-            return false;
-
-        _ = manager.Handle(Sender, prefix, code);
-        return true;
-    }
+        Args.Handled = (Args.Handled || CodeManager.Manager.Handle(TSPlayer.Server, Args.Command));
 
     #endregion
 }

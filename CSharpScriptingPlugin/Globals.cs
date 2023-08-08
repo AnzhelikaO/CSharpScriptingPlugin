@@ -1,11 +1,12 @@
 ﻿#region Using
 
+using CSharpScripting.Configuration.Delegates;
 using Microsoft.Xna.Framework;
-using TShockAPI;
+
 // ReSharper disable InconsistentNaming
 
 #endregion
-namespace CSharpScriptingPlugin.Configuration;
+namespace CSharpScripting.Configuration;
 
 public record Globals
 {
@@ -36,12 +37,12 @@ public record Globals
     [PublicAPI]public static TSPlayer all => TSPlayer.All;
     [PublicAPI]public static TSPlayer server => TSPlayer.Server;
 
-    [PublicAPI]public static readonly AsValuesArray varr = new();
-    [PublicAPI]public static readonly AsValuesList vlist = new();
-    [PublicAPI]public static readonly AsValuesTuple vtuple = new();
+    [PublicAPI]public static readonly TransformDictionaryD varr = (d => d.Values.ToArray());
+    [PublicAPI]public static readonly TransformDictionaryD vlist = (d => d.Values.ToList());
+    [PublicAPI]public static readonly TransformDictionaryD vtuple =
+        (d => CreateValueTuple(d.Values.ToArray()));
 
     [PublicAPI]public readonly DynamicDictionary kv = new();
-    [PublicAPI]public dynamic? a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z;
     #region .Constructor
     
     public Globals(TSPlayer Me)

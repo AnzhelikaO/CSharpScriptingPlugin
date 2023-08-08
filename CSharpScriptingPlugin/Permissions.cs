@@ -1,4 +1,4 @@
-﻿namespace CSharpScriptingPlugin.Configuration;
+﻿namespace CSharpScripting.Configuration;
 
 public static class Permissions
 {

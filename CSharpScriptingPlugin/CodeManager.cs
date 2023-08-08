@@ -2,25 +2,23 @@
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Scripting;
-using Microsoft.CodeAnalysis.Scripting;
-using Microsoft.Xna.Framework;
-using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using TShockAPI;
+using CSharpScripting.Configuration.Delegates;
+using CSharpScripting.Configuration.Prefixes;
+using CSharpScripting.Configuration.PlayerManagers;
+using System.Text.RegularExpressions;
+// ReSharper disable UseNullableAnnotationInsteadOfAttribute
 
 #endregion
-namespace CSharpScriptingPlugin;
+namespace CSharpScripting;
 
 public class CodeManager
 {
-    public const string PLAYER_DATA_KEY = $"{nameof(CSharpScriptingPlugin)}_Data";
     #region Manager
     
-    private static CodeManager? _Manager = new();
-    public static CodeManager? Manager
+    private static CodeManager _Manager = new();
+    [AllowNull]
+    public static CodeManager Manager
     {
         get => _Manager;
         set
@@ -28,8 +26,11 @@ public class CodeManager
             CodeManager? val = value;
             if (OnSetManager is SetManagerD setManager)
                 val = setManager(val);
+            if ((val is null) || ReferenceEquals(val, _Manager))
+                return;
+
             _Manager = val;
-            _Manager?.Initialize();
+            _Manager.Initialize();
         }
     }
 
@@ -45,92 +46,17 @@ public class CodeManager
     public bool IsInitialized { get; private set; }
 
     #endregion
-    #region ExecutePrefix
+    #region Prefixes, Options, Globals
 
-    protected const string DEFAULT_EXECUTE_PREFIX = ";";
-    private string _ExecutePrefix = DEFAULT_EXECUTE_PREFIX;
-    [AllowNull]
-    public string ExecutePrefix
-    {
-        get { lock (DefaultOptions) return _ExecutePrefix; }
-        set
-        {
-            lock (DefaultOptions)
-            {
-                _ExecutePrefix = (value ?? DEFAULT_EXECUTE_PREFIX);
-                UpdateDefaultPrefixes();
-            }
-        }
-    }
+    public CodePrefixesCollection Prefixes { get; } = new();
+    public ScriptOptionsPlayerManager Options { get; } = new();
+    public GlobalsPlayerManager Globals { get; } = new();
 
     #endregion
-    #region ShowPrefix
+    #region DefaultOptions
 
-    protected const string DEFAULT_SHOW_PREFIX = ";;";
-    private string _ShowPrefix = DEFAULT_SHOW_PREFIX;
-    [AllowNull]
-    public string ShowPrefix
-    {
-        get { lock (DefaultOptions) return _ShowPrefix; }
-        set
-        {
-            lock (DefaultOptions)
-            {
-                _ShowPrefix = (value ?? DEFAULT_SHOW_PREFIX);
-                UpdateDefaultPrefixes();
-            }
-        }
-    }
-
-    #endregion
-    #region SignaturePrefix
-
-    protected const string DEFAULT_SIGNATURE_PREFIX = ";=";
-    private string _SignaturePrefix = DEFAULT_SIGNATURE_PREFIX;
-    [AllowNull]
-    public string SignaturePrefix
-    {
-        get { lock (DefaultOptions) return _SignaturePrefix; }
-        set
-        {
-            lock (DefaultOptions)
-            {
-                _SignaturePrefix = (value ?? DEFAULT_SIGNATURE_PREFIX);
-                UpdateDefaultPrefixes();
-            }
-        }
-    }
-
-    #endregion
-    #region Prefixes
-
-    protected ReadOnlyCollection<string> DefaultPrefixes { get; private set; } =
-        new(new[] { DEFAULT_SHOW_PREFIX, DEFAULT_SIGNATURE_PREFIX, DEFAULT_EXECUTE_PREFIX });
-    protected virtual IEnumerable<string> PrefixesInner => DefaultPrefixes;
-    protected IEnumerable<string> Prefixes
-    {
-        get
-        {
-            IEnumerable<string> prefixes = PrefixesInner;
-            return (ReferenceEquals(prefixes, DefaultPrefixes)
-                        ? prefixes
-                        : GetPrefixes(prefixes));
-        }
-    }
-    
-    private void UpdateDefaultPrefixes() =>
-        DefaultPrefixes = new(GetPrefixes(new[] { _ExecutePrefix, _ShowPrefix, _SignaturePrefix }).ToArray());
-    private static IEnumerable<string> GetPrefixes(IEnumerable<string> Prefixes) =>
-        Prefixes.Where(p => !string.IsNullOrWhiteSpace(p))
-                .Distinct()
-                .Select(p => p.ToLower())
-                .OrderByDescending(p => p.Length);
-
-    #endregion
-    #region Options
-
-    private static ScriptOptions? _DefaultOptions;
-    protected static ScriptOptions DefaultOptions
+    private ScriptOptions? _DefaultOptions;
+    public ScriptOptions DefaultOptions
     {
         get
         {
@@ -185,137 +111,65 @@ public class CodeManager
                                              "Terraria.GameContent.Tile_Entities",
                                              "Terraria.ID",
                                              "TShockAPI",
-                                             "CSharpScriptingPlugin");
+                                             "CSharpScripting");
             }
             return _DefaultOptions;
         }
     }
-    private ScriptOptions _Options = DefaultOptions;
-    [AllowNull]
-    public ScriptOptions Options
-    {
-        get => _Options;
-        set => _Options = (value ?? DefaultOptions);
-    }
 
     #endregion
 
-    #region Initialize
+    #region Initialize[Inner]
 
     public bool Initialize()
     {
         if (IsInitialized)
             return false;
 
-        InitializeInner(Options, GetGlobals(TSPlayer.Server));
-        return (IsInitialized = true);
+        try
+        {
+            InitializeInner();
+            return (IsInitialized = true);
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return false;
+        }
     }
-    protected virtual void InitializeInner(ScriptOptions Options, Globals Globals) =>
-        CSharpScript.RunAsync($"{nameof(Globals.cw)}(\"Code manager initialized.\")", Options, Globals)
+    protected virtual void InitializeInner() =>
+        CSharpScript.RunAsync($"{nameof(Configuration.Globals.cw)}(\"Code manager initialized.\")",
+                              Options.Get(TSPlayer.Server), Globals.Get(TSPlayer.Server))
                     .Wait();
 
     #endregion
-    #region GetGlobals[Inner]
-    // ReSharper disable UseNullableAnnotationInsteadOfAttribute
 
-    public Globals GetGlobals(TSPlayer Sender)
+    #region Handle[Inner]
+
+    protected internal bool Handle(TSPlayer? Sender, string Text)
     {
-        ArgumentNullException.ThrowIfNull(Sender);
-        return (GetGlobalsInner(Sender) ?? _GetGlobals(Sender));
-    }
-    [return: MaybeNull]
-    protected virtual Globals GetGlobalsInner(TSPlayer Sender) => _GetGlobals(Sender);
-    private static Globals _GetGlobals(TSPlayer Sender)
-    {
-        if (!Sender.ContainsData(PLAYER_DATA_KEY))
-            Sender.SetData(PLAYER_DATA_KEY, new Globals(Sender));
-        return Sender.GetData<Globals>(PLAYER_DATA_KEY);
-    }
-
-    // ReSharper restore UseNullableAnnotationInsteadOfAttribute
-    #endregion
-
-    #region ShouldHandle
-
-    public bool ShouldHandle(TSPlayer Sender, string Input,
-                             [MaybeNullWhen(false)]out string Prefix,
-                             [MaybeNullWhen(false)]out string Code)
-    {
-        ArgumentNullException.ThrowIfNull(Sender);
-        ArgumentNullException.ThrowIfNull(Input);
-        Prefix = Code = null;
-        Input = Input.Trim();
-        if (string.IsNullOrWhiteSpace(Input))
+        if ((Sender is null)
+                || string.IsNullOrWhiteSpace(Text)
+                || !Prefixes.TryGet(Text, out string? showCode, out CodePrefix? codePrefix))
             return false;
 
-        string lowerInput = Input.ToLower();
-        Prefix = Prefixes.FirstOrDefault(p => lowerInput.StartsWith(p));
-        if (Prefix is not null)
-        {
-            Code = Input[Prefix.Length..];
-            return true;
-        }
-        return false;
-    }
-
-    #endregion
-    #region Handle
-
-    public async Task<bool> Handle(TSPlayer Sender, string Prefix, string Code)
-    {
-        ArgumentNullException.ThrowIfNull(Sender);
-        ArgumentNullException.ThrowIfNull(Prefix);
-        ArgumentNullException.ThrowIfNull(Code);
-        try
-        {
-            await ShowInput(Sender, Prefix, Code);
-            return await HandleInner(Sender, Prefix, Code, Options, GetGlobals(Sender));
-        }
-        catch (Exception exception)
-        {
-            Sender.SendErrorMessage(exception.ToString());
-        }
+        string handleCode = $"{ReplaceCode(showCode)}{(codePrefix.AddSemicolon ? ";" : string.Empty)}";
+        _ = HandleInner(Sender, showCode, handleCode, codePrefix)
+            .ContinueWith(t => TShock.Log.ConsoleError(t.Exception?.ToString()),
+                          TaskContinuationOptions.OnlyOnFaulted);
         return true;
     }
+    protected virtual async Task HandleInner(TSPlayer Sender, string ShowCode,
+                                             string HandleCode, CodePrefix CodePrefix) =>
+        await CodePrefix.Handle(Sender, ShowCode, HandleCode);
 
     #endregion
-    #region ShowInput
+    #region ReplaceCode
 
-    protected virtual Task ShowInput(TSPlayer Sender, string Prefix, string Code)
-    {
-        Globals.admins.ForEach(p => p.SendMessage($"{Prefix}{Code}", Color.HotPink));
-        return Task.CompletedTask;
-    }
-
-    #endregion
-    #region HandleInner
-
-    protected virtual async Task<bool> HandleInner(TSPlayer Sender, string Prefix, string Code,
-                                                   ScriptOptions Options, Globals Globals)
-    {
-        string code = $"{Code};";
-        if (Prefix == ExecutePrefix)
-        {
-            await CSharpScript.RunAsync(code, Options, Globals);
-            return true;
-        }
-        else if (Prefix == ShowPrefix)
-        {
-            await CSharpScript.RunAsync($"return {code}", Options, Globals)
-                              .ContinueWith(s => Globals.cw(s.Result.ReturnValue));
-            return true;
-        }
-        else if (Prefix == SignaturePrefix)
-        {
-            await CSharpScript.RunAsync($"return {code}", Options, Globals)
-                              .ContinueWith(s => s.Result
-                                                  .ReturnValue
-                                                  .GetType()
-                                                  .GetMembers()
-                                                  .ForEach(m => Globals.cw(m)));
-        }
-        return false;
-    }
+    private const string VAR = "var";
+    private static readonly Regex VAR_REGEX = new($@"\$(?<{VAR}>[a-zA-Z_][a-zA-Z\d_]*)");
+    protected internal virtual string ReplaceCode(string Text) =>
+        VAR_REGEX.Replace(Text, (m => $"{nameof(Configuration.Globals.kv)}[\"{m.Groups[VAR].Value}\"]"));
 
     #endregion
 }
