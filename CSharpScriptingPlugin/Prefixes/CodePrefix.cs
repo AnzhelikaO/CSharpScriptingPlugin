@@ -1,51 +1,35 @@
-﻿#region Using
-
-using Microsoft.Xna.Framework;
-
-#endregion
-namespace CSharpScripting.Configuration.Prefixes;
+﻿namespace CSharpScripting.Configuration.Prefixes;
 
 public abstract class CodePrefix
 {
-    #region Register
+    public const string DEFAULT_PREFIX = ";";
 
     internal virtual bool Register => true;
-
-    #endregion
-    #region AddSemicolonIfNeeded
-
     protected internal virtual bool AddSemicolon => true;
-
-    #endregion
+    protected virtual bool ShowInputToSender => true;
+    protected virtual bool ShowInputToAdmins => true;
     #region Prefix[Inner]
 
     private string? _Prefix;
-    public string Prefix
-    {
-        get
-        {
-            ValidateConstant(ref _Prefix, PrefixInner);
-            return _Prefix;
-        }
-    }
+    public string Prefix => (_Prefix ??= ValidateConstant(PrefixInner, _Prefix));
     protected abstract string PrefixInner { get; }
 
     #endregion
 
     #region Handle
 
-    public async Task Handle(TSPlayer Sender, string ShowCode, string HandleCode)
+    public async Task Handle(TSPlayer Sender, string HandleCode, string? ShowCode = null)
     {
         ArgumentNullException.ThrowIfNull(Sender);
-        ArgumentNullException.ThrowIfNull(ShowCode);
         ArgumentNullException.ThrowIfNull(HandleCode);
+        ShowCode ??= HandleCode;
 
         try
         {
-            await ShowInput(Sender, ShowCode);
-            await HandleInner(Sender, HandleCode,
-                              CodeManager.Manager.Options.Get(Sender),
-                              CodeManager.Manager.Globals.Get(Sender));
+            CodeManager manager = CodeManager.Manager;
+            (ScriptOptions options, Globals globals) = manager.PlayerManager.Get(Sender);
+            await ShowInput(Sender, ShowCode, manager);
+            await HandleInner(Sender, HandleCode, manager, options, globals);
         }
         catch (Exception exception)
         {
@@ -55,24 +39,56 @@ public abstract class CodePrefix
 
     #endregion
 
-    #region ShowInput
+    #region ShowInput[Inner]
 
-    protected virtual Task ShowInput(TSPlayer Sender, string Code)
+    private async Task ShowInput(TSPlayer Sender, string Code, CodeManager CodeManager)
     {
+        bool toSender = ShowInputToSender, toAdmins = ShowInputToAdmins;
+        if (!toSender && !toAdmins)
+            return;
+
         TSPlayer[] admins = Globals.admins;
         string text = $"{Prefix}{Code}";
-        foreach (TSPlayer plr in admins)
-            plr.SendMessage(text, Color.HotPink);
-        if (!admins.Contains(Sender))
-            Sender.SendMessage(text, Color.HotPink);
-        return Task.CompletedTask;
+        if (toAdmins)
+            foreach (TSPlayer plr in admins)
+                plr.SendMessage(text, CodeManager.CodeColor);
+        if (toSender && (!toAdmins || !admins.Contains(Sender)))
+            Sender.SendMessage(text, CodeManager.CodeColor);
+
+        await ShowInputInner(Sender, Code, CodeManager);
     }
+    protected virtual Task ShowInputInner(TSPlayer Sender, string Code, CodeManager CodeManager) =>
+        Task.CompletedTask;
 
     #endregion
     #region HandleInner
-    
-    protected abstract Task HandleInner(TSPlayer Sender, string Code,
+
+    protected abstract Task HandleInner(TSPlayer Sender, string Code, CodeManager CodeManager,
                                         ScriptOptions Options, Globals Globals);
+
+    #endregion
+
+    #region Equals
+
+    public override bool Equals(object? Object) =>
+        ((Object is CodePrefix prefix)
+            && (prefix.GetType() == GetType())
+            && (prefix.Register == Register)
+            && (prefix.AddSemicolon == AddSemicolon)
+            && (prefix.ShowInputToSender == ShowInputToSender)
+            && (prefix.ShowInputToAdmins == ShowInputToAdmins)
+            && (prefix.Prefix == Prefix));
+
+    #endregion
+    #region GetHashCode
+
+    public override int GetHashCode() =>
+        HashCode.Combine(Register, AddSemicolon, ShowInputToSender, ShowInputToAdmins, Prefix);
+
+    #endregion
+    #region ToString
+
+    public override string ToString() => Prefix;
 
     #endregion
 }

@@ -1,120 +1,151 @@
-﻿#region Using
-
-using CSharpScripting.Configuration.Delegates;
-
-#endregion
-namespace CSharpScripting.Configuration;
+﻿namespace CSharpScripting.Configuration;
 
 public sealed class DynamicDictionary
 {
     #region Records
 
-    private sealed record Null { public static readonly Null Instance = new(); }
     private sealed record Val(dynamic Value, ulong Index);
 
     #endregion
+    #region EventsCollection
 
-    private static ulong Index;
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    public sealed class EventsCollection
+    {
+        public event GetValuesD? GetValues;
+        public event SetValuesD? SetValues;
+        public event PreClearDictionaryD? PreClear, PreRemoveEvents;
+        public event PostClearDictionaryD? PostClear, PostRemoveEvents;
+
+        internal ref GetValuesD? _GetValues => ref GetValues;
+        internal ref SetValuesD? _SetValues => ref SetValues;
+        internal PreClearDictionaryD? _PreClear => PreClear;
+        internal PreClearDictionaryD? _PreRemoveEvents => PreRemoveEvents;
+        internal PostClearDictionaryD? _PostClear => PostClear;
+        internal PostClearDictionaryD? _PostRemoveEvents => PostRemoveEvents;
+
+        internal EventsCollection() { }
+    }
+
+    #endregion
+
+    private ulong Index;
     private readonly Dictionary<dynamic, Val> InnerDictionary = new();
-    public event GetSetValueD? OnGetValue, OnSetValue;
-    public event ClearD? OnClear, OnRemoveEvents;
+    public EventsCollection Events { get; } = new();
     #region .Constructor
 
     internal DynamicDictionary() { }
 
     #endregion
 
-    #region operator[] (Single key)
-    
-    [PublicAPI]
-    public dynamic? this[dynamic? Key]
+    #region operator[]
+#pragma warning disable CS8619 // dynamic does not work well with nullability
+
+    public dynamic? this[params dynamic?[]? Keys]
     {
         get
         {
-            dynamic? val = (InnerDictionary.TryGetValue((Key ?? Null.Instance), out Val? value)
-                                ? value
-                                : null)?.Value;
-            return ((OnGetValue is GetSetValueD onGetValue) ? onGetValue(Key, val) : val);
-        }
-        set
-        {
-            dynamic? val = value;
-            if (OnSetValue is GetSetValueD onSetValue)
-                val = onSetValue(Key, val);
-            InnerDictionary[Key ?? Null.Instance] = new Val(val, ++Index);
-        }
-    }
+            ExtractKeys(Keys, out TransformDictionaryD? transform, out dynamic?[] keys);
+            Dictionary<dynamic, dynamic?> kv =
+                keys.ToDictionary(k => (k ?? Null.Instance),
+                                  k => (InnerDictionary.TryGetValue((k ?? Null.Instance), out Val? val)
+                                            ? val?.Value
+                                            : null));
+            dynamic? ret = ((transform is null) ? kv : transform.Invoke(kv));
+            Events._GetValues?.Invoke(transform, keys, kv, ref ret);
+            return ((ret is IDictionary { Count: 1 } dict)
+                        ? dict.Values.Cast<dynamic>().First()
+                        : ret);
 
-    #endregion
-    #region operator[] (Multiple keys)
+            #region ExtractKeys
 
-    [PublicAPI]
-    public dynamic? this[dynamic? Key1, dynamic? Key2, params dynamic?[]? OtherKeys]
-    {
-        get
-        {
-            OtherKeys ??= Array.Empty<dynamic>();
-            Dictionary<dynamic, dynamic> dict = new(OtherKeys.Length + 2);
-            foreach (dynamic? key in new[] { Key1, Key2 }.Concat(OtherKeys))
-                dict[(key ?? Null.Instance)] = this[key];
-            return dict;
-        }
-        set
-        {
-            OtherKeys ??= Array.Empty<dynamic>();
-            if (!ExtractValues(value, out IEnumerable<dynamic> dynamics))
+            static void ExtractKeys(dynamic?[]? KeysIn, out TransformDictionaryD? Transform,
+                                    out dynamic?[] KeysOut)
             {
-                foreach (dynamic? key in new[] { Key1, Key2 }.Concat(OtherKeys))
-                    this[(key ?? Null.Instance)] = value;
-                return;
+                KeysIn ??= Array.Empty<dynamic>();
+                Transform = (KeysIn.FirstOrDefault() as TransformDictionaryD);
+                KeysOut = ((Transform is null)
+                               ? KeysIn
+                               : ((KeysIn.Length > 1)
+                                    ? KeysIn.Skip(1).ToArray()
+                                    : throw new ArgumentException(
+                                          "Single key is dictionary transformer, no other keys provided.")));
             }
 
-            dynamic[] val = dynamics.ToArray();
-            if (val.Length != (OtherKeys.Length + 2))
-                throw new ArgumentOutOfRangeException(
-                    $"{val.Length} values for {OtherKeys.Length + 2} keys.");
-            this[(Key1 ?? Null.Instance)] = val[0];
-            this[(Key2 ?? Null.Instance)] = val[1];
-            for (int i = 0; i < OtherKeys.Length; i++)
-                this[(OtherKeys[i] ?? Null.Instance)] = val[i + 2];
+            #endregion
         }
-    }
-
-    #endregion
-    #region operator[] (Multiple keys, transform values)
-
-    [PublicAPI]
-    public dynamic? this[TransformDictionaryD? As, dynamic? Key1,
-                         dynamic? Key2, params dynamic?[]? OtherKeys]
-    {
-        get
+        set
         {
-            Dictionary<dynamic, dynamic> dict = this[Key1, Key2, OtherKeys];
-            return ((As is null) ? dict : As(dict));
+            ExtractKeys(ref Keys);
+            dynamic?[] values = new [] { value };
+            if (Keys.Length > 1)
+                ExtractValues(value, out values);
+            if (Keys.Length != values.Length)
+                throw new ArgumentException($"{values.Length} values for {Keys.Length} keys.");
+
+            if (Events._SetValues?.Invoke(Keys, values) is not false)
+                for (int i = 0; i < Keys.Length; i++)
+                    InnerDictionary[Keys[i] ?? Null.Instance] =
+                        new Val(values[i], Interlocked.Increment(ref Index));
+
+            #region ExtractKeys
+
+            static void ExtractKeys([NotNull]ref dynamic?[]? Keys) =>
+                Keys ??= Array.Empty<dynamic>();
+
+            #endregion
+            #region ExtractValues
+
+            static void ExtractValues(dynamic? Value, out dynamic?[] Values) =>
+                Values = (Value switch
+                {
+                    ITuple tuple => ExtractTuple(tuple),
+                    dynamic?[] values => values,
+                    IEnumerable<dynamic?> values => values.ToArray(),
+                    IEnumerable values => values.Cast<dynamic?>().ToArray(),
+                    _ => new [] { Value }
+                });
+            #region ExtractTuple
+
+            static dynamic?[] ExtractTuple(ITuple Tuple)
+            {
+                dynamic?[] elements = new dynamic?[Tuple.Length];
+                for (int i = 0; i < Tuple.Length; i++)
+                    elements[i] = Tuple[i];
+                return elements;
+            }
+
+            #endregion
+
+            #endregion
         }
     }
 
+#pragma warning restore CS8619
     #endregion
 
     #region Clear
 
     public bool Clear(bool Force = false)
     {
-        bool clear = DoClear(OnClear, Force);
-        if (clear)
+        bool success = ((Events._PreClear is not PreClearDictionaryD onClear) || onClear(Force) || Force);
+        if (success)
             InnerDictionary.Clear();
-        return clear;
+        Events._PostClear?.Invoke(success, Force);
+        return success;
     }
 
     #endregion
     #region RemoveEvents
-    
+
     public bool RemoveEvents(bool Force = false)
     {
-        bool clear = DoClear(OnRemoveEvents, Force);
-        if (clear)
-            OnGetValue = OnSetValue = null;
-        return clear;
+        bool success = ((Events._PreRemoveEvents is not PreClearDictionaryD onClear)
+                            || onClear(Force) || Force);
+        if (success)
+            (Events._GetValues, Events._SetValues) = (null, null);
+        Events._PostRemoveEvents?.Invoke(success, Force);
+        return success;
     }
 
     #endregion
@@ -127,27 +158,19 @@ public sealed class DynamicDictionary
     #endregion
 
     #region Show
-    
+
     public string Show(bool All = false) =>
-        string.Join("\n", (All
-                               ? InnerDictionary
-                               : InnerDictionary.Where(p => (Index - p.Value.Index) <= 10))
-                          .OrderBy(p => p.Value.Index)
-                          .Select(Show));
-    private static string Show(KeyValuePair<dynamic, Val> Pair) =>
-        $"[{Pair.Value.Index}] {ToStringNull(Pair.Key)}={ToStringNull(Pair.Value.Value)}";
+        string.Join(
+            "\n", (All
+                       ? InnerDictionary
+                       : InnerDictionary.Where(p => (Index - p.Value.Index) <= 10))
+                  .OrderBy(p => p.Value.Index)
+                  .Select(p => $"[{p.Value.Index}] {ToStringNull(p.Key)}={ToStringNull(p.Value.Value)}"));
 
     #endregion
     #region ToString
 
     public override string ToString() => Show(All: false);
-
-    #endregion
-
-    #region DoClear
-
-    private static bool DoClear(ClearD? Event, bool Force) =>
-        ((Event is null) || Event(Force) || Force);
 
     #endregion
 }

@@ -1,137 +1,220 @@
-﻿#region Using
-
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using System.Reflection;
-using CSharpScripting.Configuration.Delegates;
-using CSharpScripting.Configuration.Prefixes;
-using CSharpScripting.Configuration.PlayerManagers;
-using System.Text.RegularExpressions;
-using Permissions = CSharpScripting.Configuration.Permissions;
-
-// ReSharper disable UseNullableAnnotationInsteadOfAttribute
-
-#endregion
-namespace CSharpScripting;
+﻿namespace CSharpScripting;
 
 public class CodeManager
 {
+    #region [Static/Instance]Events
+
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    public static class StaticEvents
+    {
+        public static event PreSetCodeManagerD? PreSet;
+        public static event PostSetCodeManagerD? PostSet;
+
+        internal static PreSetCodeManagerD? _PreSet => PreSet;
+        internal static PostSetCodeManagerD? _PostSet => PostSet;
+    }
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    public sealed class InstanceEvents
+    {
+        public event PreToggleD? PreToggle, PreInlineCodeToggle;
+        public event PostToggleD? PostToggle, PostInlineCodeToggle;
+
+        internal PreToggleD? _PreToggle => PreToggle;
+        internal PreToggleD? _PreInlineCodeToggle => PreInlineCodeToggle;
+        internal PostToggleD? _PostToggle => PostToggle;
+        internal PostToggleD? _PostInlineCodeToggle => PostInlineCodeToggle;
+
+        internal InstanceEvents() { }
+    }
+
+    #endregion
+
+
+
     #region Manager
-    
+
     private static CodeManager _Manager = new();
-    [AllowNull]
     public static CodeManager Manager
     {
         get => _Manager;
         set
         {
-            CodeManager? val = value;
-            if (OnSetManager is SetManagerD setManager)
-                val = setManager(val);
-            if ((val is null) || ReferenceEquals(val, _Manager))
-                return;
+            ArgumentNullException.ThrowIfNull(value);
+            if (StaticEvents._PreSet is PreSetCodeManagerD setManager)
+            {
+                value = setManager(value);
+                if (value is null)
+                    throw new NullReferenceException($"{nameof(StaticEvents.PreSet)} returned null.");
+            }
 
-            _Manager = val;
-            _Manager.Initialize();
+            _Manager = value;
+            bool isInitialized = _Manager.Initialize(FromGamePostInitialize: false);
+            StaticEvents._PostSet?.Invoke(value, isInitialized);
         }
     }
 
     #endregion
-    #region OnSetManager
-
-    public static event SetManagerD? OnSetManager;
-
-    #endregion
-
-    #region IsInitialized
-
-    public bool IsInitialized { get; private set; }
-
-    #endregion
-    #region Prefixes, Options, Globals
-
-    public CodePrefixesCollection Prefixes { get; } = new();
-    public ScriptOptionsPlayerManager Options { get; } = new();
-    public GlobalsPlayerManager Globals { get; } = new();
-
-    #endregion
     #region DefaultOptions
 
-    private ScriptOptions? _DefaultOptions;
-    public ScriptOptions DefaultOptions
+    private static ScriptOptions? _DefaultOptions;
+    public static ScriptOptions DefaultOptions
     {
         get
         {
             if (_DefaultOptions is null)
             {
-                Assembly[] neededAssemblies = AppDomain.CurrentDomain
-                                                       .GetAssemblies()
-                                                       .Where(a => !a.IsDynamic)
-                                                       .ToArray();
-                string dir = AppDomain.CurrentDomain.BaseDirectory;
-                _DefaultOptions =
-                    ScriptOptions.Default
-                                 .WithLanguageVersion(LanguageVersion.Latest)
-                                 .WithAllowUnsafe(false)
-                                 .AddReferences(neededAssemblies
-                                                    .Where(a => !string.IsNullOrWhiteSpace(a.Location)))
-                                 .AddReferences(neededAssemblies
-                                                .Where(a => string.IsNullOrWhiteSpace(a.Location))
-                                                .Select(a =>
-                                                {
-                                                    if (!string.IsNullOrWhiteSpace(a.Location)
-                                                     || (a.GetName().Name is not string name))
-                                                        return null;
-
-                                                    name = $"{name}.dll";
-                                                    if (new[]
-                                                        {
-                                                            Path.Combine(dir, name),
-                                                            Path.Combine(dir, "bin", name),
-                                                            Path.Combine(dir, "ServerPlugins", name)
-                                                        }.FirstOrDefault(f => File.Exists(f)) is not string
-                                                        file)
-                                                        return null;
-                                                    using FileStream fs = File.OpenRead(file);
-                                                    return MetadataReference.CreateFromStream(fs);
-                                                })
-                                                .Where(r => (r is not null)))
-                                 .AddImports("System",
-                                             "System.Collections",
-                                             "System.Collections.Concurrent",
-                                             "System.Collections.Generic",
-                                             "System.Collections.ObjectModel",
-                                             "System.Diagnostics.CodeAnalysis",
-                                             "System.IO",
-                                             "System.IO.Compression",
-                                             "System.Linq",
-                                             "System.Reflection",
-                                             "System.Text",
-                                             "System.Text.RegularExpressions",
-                                             "Terraria",
-                                             "Terraria.DataStructures",
-                                             "Terraria.GameContent.Tile_Entities",
-                                             "Terraria.ID",
-                                             "TShockAPI",
-                                             "CSharpScripting");
+                GetBaseScriptOptions(out ScriptOptions op);
+                ApplyScriptOptionsReferences(ref op);
+                ApplyScriptOptionsImports(ref op);
+                _DefaultOptions = op;
             }
             return _DefaultOptions;
+
+            #region GetBaseScriptOptions
+
+            static void GetBaseScriptOptions(out ScriptOptions Options) =>
+                Options = ScriptOptions.Default
+                                       .WithLanguageVersion(LanguageVersion.Latest)
+                                       .WithAllowUnsafe(false);
+
+            #endregion
+            #region ApplyScriptOptionsReferences
+
+            static void ApplyScriptOptionsReferences(ref ScriptOptions Options)
+            {
+                GetNewAssemblyFileNames(ref Options, out IEnumerable<string> newAssemblyFileNames);
+                Options = Options.AddReferences(
+                    GetNewAssemblies(AppDomain.CurrentDomain.BaseDirectory, newAssemblyFileNames));
+
+                #region GetNewAssemblyFileNames
+
+                static void GetNewAssemblyFileNames(ref ScriptOptions Options, out IEnumerable<string> FileNames)
+                {
+                    Assembly[] neededAssemblies = AppDomain.CurrentDomain
+                                                           .GetAssemblies()
+                                                           .Where(a => !a.IsDynamic)
+                                                           .ToArray();
+                    Options = Options.WithReferences(neededAssemblies.Where(a =>
+                                                        !string.IsNullOrWhiteSpace(a.Location)));
+                    FileNames = neededAssemblies.Where(a => string.IsNullOrWhiteSpace(a.Location))
+                                                .Select(a => ((a.GetName().Name is string name)
+                                                                  ? $"{name}.dll"
+                                                                  : null))
+                                                .Where(a => (a is not null))!;
+                }
+
+                #endregion
+                #region GetNewAssemblies
+
+                static IEnumerable<MetadataReference> GetNewAssemblies(
+                    string CurrentDirectory, IEnumerable<string> FileNames)
+                {
+                    GetAdditionalPluginsPaths(out IList<string> additionalPluginsPaths);
+                    foreach (string name in FileNames)
+                    {
+                        List<string> files = new(additionalPluginsPaths.Count + 3)
+                        {
+                            Path.Combine(CurrentDirectory, name),
+                            Path.Combine(CurrentDirectory, "bin", name),
+                            Path.Combine(CurrentDirectory, "ServerPlugins", name)
+                        };
+                        files.AddRange(additionalPluginsPaths.Select(p => Path.Combine(p, name)));
+                        if (files.FirstOrDefault(File.Exists) is not string file)
+                            continue;
+
+                        MetadataReference reference;
+                        try
+                        {
+                            using FileStream fs = File.OpenRead(file);
+                            reference = MetadataReference.CreateFromStream(fs);
+                        } catch { continue; }
+                        yield return reference;
+                    }
+
+                    #region GetAdditionalPluginsPaths
+
+                    // Somehow there are 2 System.Collections.Immutable references
+                    // or idk what's happening here so i use reflection
+                    // because otherwise it throws missing method exception...
+                    static void GetAdditionalPluginsPaths(out IList<string> AdditionalPluginsPaths) =>
+                        AdditionalPluginsPaths =
+                            (((typeof(ServerApi).GetProperty(nameof(ServerApi.AdditionalPluginsPaths))?
+                                                .GetMethod is MethodInfo getter)
+                                  ? (getter.Invoke(null, null) as IList<string>)
+                                  : null) ?? Array.Empty<string>());
+
+                    #endregion
+                }
+
+                #endregion
+            }
+
+            #endregion
+            #region ApplyScriptOptionsImports
+
+            static void ApplyScriptOptionsImports(ref ScriptOptions Options)
+            {
+                Options = Options.AddImports(GetNamespace(nameof(System)),
+                                             GetNamespace(nameof(System.Collections)),
+                                             GetNamespace(nameof(System.Collections.Concurrent)),
+                                             GetNamespace(nameof(System.Collections.Generic)),
+                                             GetNamespace(nameof(System.Collections.ObjectModel)),
+                                             GetNamespace(nameof(System.Diagnostics.CodeAnalysis)),
+                                             GetNamespace(nameof(System.IO)),
+                                             GetNamespace(nameof(System.IO.Compression)),
+                                             GetNamespace(nameof(System.Linq)),
+                                             GetNamespace(nameof(System.Reflection)),
+                                             GetNamespace(nameof(System.Text)),
+                                             GetNamespace(nameof(System.Text.RegularExpressions)),
+                                             GetNamespace(nameof(Terraria)),
+                                             GetNamespace(nameof(Terraria.DataStructures)),
+                                             GetNamespace(nameof(Terraria.GameContent.Tile_Entities)),
+                                             GetNamespace(nameof(Terraria.ID)),
+                                             GetNamespace(nameof(TShockAPI)),
+                                             GetNamespace(nameof(CSharpScripting)));
+
+                static string GetNamespace(string _, [CallerArgumentExpression("_")]string Name = "") =>
+                    Name[7..^1];
+            }
+
+            #endregion
         }
     }
 
     #endregion
 
-    #region Initialize[Inner]
+    public bool IsInitialized { get; private set; }
+    protected virtual bool InitializeOnGamePostInitialize => true;
+    public bool IsEnabled { get; private set; }
+    protected bool IsOnlyInlineCodeEnabled { get; private set; }
+    public bool IsInlineCodeEnabled => (IsEnabled && IsOnlyInlineCodeEnabled);
 
-    public bool Initialize()
+    public CodePrefixesCollection Prefixes { get; } = new();
+    public PlayerManager PlayerManager { get; } = new();
+    public virtual Color CodeColor => Color.HotPink;
+    public InstanceEvents Events { get; } = new();
+    #region .Constructor
+
+    protected internal CodeManager() { }
+
+    #endregion
+
+
+
+    #region Initialize
+
+    [PublicAPI]
+    public bool Initialize() => Initialize(FromGamePostInitialize: false);
+    internal bool Initialize(bool FromGamePostInitialize)
     {
-        if (IsInitialized)
+        if (IsInitialized || (FromGamePostInitialize && !InitializeOnGamePostInitialize))
             return false;
 
         try
         {
             InitializeInner();
-            return (IsInitialized = true);
+            IsInitialized = true;
+            return Enable(FromInitialize: true);
         }
         catch (Exception ex)
         {
@@ -139,40 +222,403 @@ public class CodeManager
             return false;
         }
     }
-    protected virtual void InitializeInner() =>
-        CSharpScript.RunAsync($"{nameof(Configuration.Globals.cw)}(\"Code manager initialized.\")",
-                              Options.Get(TSPlayer.Server), Globals.Get(TSPlayer.Server))
+
+    #endregion
+    #region InitializeInner
+
+    protected virtual void InitializeInner()
+    {
+        (ScriptOptions options, Globals globals) = PlayerManager.Get(TSPlayer.Server);
+        CSharpScript.RunAsync($"{nameof(Globals.cw)}(\"Code manager initialized.\")", options, globals)
                     .Wait();
+    }
+
+    #endregion
+
+    #region Enable
+
+    [PublicAPI]
+    public bool Enable() => Enable(FromInitialize: false);
+    private bool Enable(bool FromInitialize, bool InvokeHook = true)
+    {
+        if (IsEnabled)
+            return false;
+
+        bool enableInnerSuccess = false;
+        try
+        {
+            if (!EnableInner(FromInitialize))
+                return false;
+            IsEnabled = enableInnerSuccess = true;
+
+            if (!InvokeHook || (Events._PreToggle is not PreToggleD onToggle))
+                return true;
+
+            bool toggle = (onToggle.Invoke(this, Enable: true, FromInitialize) || FromInitialize);
+            if (!toggle)
+                Disable(FromDispose: false, InvokeHook: false);
+            Events._PostToggle?.Invoke(this, Success: toggle, Enable: true, FromInitialize);
+            return toggle;
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return enableInnerSuccess;
+        }
+    }
+
+    #endregion
+    #region EnableInner
+
+    protected virtual bool EnableInner(bool FromInitialize)
+    {
+        RegisterHooks();
+        EnableInlineCode(FromInitialize);
+        return true;
+    }
+
+    #endregion
+    #region Disable[Inner]
+
+    [PublicAPI]
+    public bool Disable() => Disable(FromDispose: false);
+    internal bool Disable(bool FromDispose, bool InvokeHook = true)
+    {
+        if (!IsEnabled)
+            return false;
+
+        bool disableInnerSuccess = false;
+        try
+        {
+            bool disabledInner = DisableInner(FromDispose);
+            if (!disabledInner && !FromDispose)
+                return false;
+            IsEnabled = false;
+            disableInnerSuccess = true;
+
+            if (!disabledInner && FromDispose)
+                _Disable(FromDispose: true);
+
+            if (!InvokeHook || (Events._PreToggle is not PreToggleD onToggle))
+                return true;
+
+            bool toggle = (onToggle.Invoke(this, Enable: false, FromDispose) || FromDispose);
+            if (!toggle)
+                Enable(FromInitialize: false, InvokeHook: false);
+            Events._PostToggle?.Invoke(this, Success: toggle, Enable: false, FromDispose);
+            return toggle;
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return disableInnerSuccess;
+        }
+    }
+    protected virtual bool DisableInner(bool FromDispose) => _Disable(FromDispose);
+    private bool _Disable(bool FromDispose)
+    {
+        DeregisterHooks();
+        DisableInlineCode(FromDispose);
+        return true;
+    }
+
+    #endregion
+
+    #region EnableInlineCode[Inner]
+
+    [PublicAPI]
+    public bool EnableInlineCode() => EnableInlineCode(FromInitialize: false);
+    private bool EnableInlineCode(bool FromInitialize, bool InvokeHook = true)
+    {
+        if (IsOnlyInlineCodeEnabled)
+            return false;
+
+        bool enableInnerSuccess = false;
+        try
+        {
+            if (!EnableInlineCodeInner(FromInitialize))
+                return false;
+            IsOnlyInlineCodeEnabled = enableInnerSuccess = true;
+
+            if (!InvokeHook || (Events._PreInlineCodeToggle is not PreToggleD onToggle))
+                return true;
+
+            bool toggle = (onToggle.Invoke(this, Enable: true, FromInitialize) || FromInitialize);
+            if (!toggle)
+                Disable(FromDispose: false, InvokeHook: false);
+            Events._PostInlineCodeToggle?.Invoke(this, Success: toggle, Enable: true, FromInitialize);
+            return toggle;
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return enableInnerSuccess;
+        }
+    }
+    protected virtual bool EnableInlineCodeInner(bool FromInitialize) => true;
+
+    #endregion
+    #region DisableInlineCode[Inner]
+
+    [PublicAPI]
+    public bool DisableInlineCode() => DisableInlineCode(FromDispose: false);
+    private bool DisableInlineCode(bool FromDispose, bool InvokeHook = true)
+    {
+        if (!IsOnlyInlineCodeEnabled)
+            return false;
+
+        bool disableInnerSuccess = false;
+        try
+        {
+            if (!DisableInlineCodeInner(FromDispose) && !FromDispose)
+                return false;
+            IsOnlyInlineCodeEnabled = false;
+            disableInnerSuccess = true;
+
+            if (!InvokeHook || (Events._PreInlineCodeToggle is not PreToggleD onToggle))
+                return true;
+
+            bool toggle = (onToggle.Invoke(this, Enable: false, FromDispose) || FromDispose);
+            if (!toggle)
+                EnableInlineCode(FromInitialize: false, InvokeHook: false);
+            Events._PostInlineCodeToggle?.Invoke(this, Success: toggle, Enable: false, FromDispose);
+            return toggle;
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return disableInnerSuccess;
+        }
+    }
+    protected virtual bool DisableInlineCodeInner(bool FromDispose) => true;
+
+    #endregion
+
+    #region RegisterHooks
+
+    protected bool RegisterHooks()
+    {
+        try
+        {
+            RegisterHooksInner();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return false;
+        }
+    }
+
+    #endregion
+    #region RegisterHooksInner
+
+    protected virtual bool RegisterHooksInner()
+    {
+        Plugin.RegisterHooks();
+        return true;
+    }
+
+    #endregion
+    #region DeregisterHooks
+
+    protected bool DeregisterHooks()
+    {
+        try
+        {
+            DeregisterHooksInner();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TShock.Log.ConsoleError(ex.ToString());
+            return false;
+        }
+    }
+
+    #endregion
+    #region DeregisterHooksInner
+
+    protected virtual bool DeregisterHooksInner()
+    {
+        Plugin.DeregisterHooks();
+        return true;
+    }
+
+    #endregion
+
+
+
+    #region HasExecutePermission
+
+    public virtual bool HasExecutePermission([NotNullWhen(true)]TSPlayer? Sender) =>
+        (Sender?.HasPermission(Permissions.USE) is true);
+
+    #endregion
+    #region HasInlinePermission
+
+    public virtual bool HasInlinePermission([NotNullWhen(true)]TSPlayer? Sender) =>
+        (HasExecutePermission(Sender) && Sender.HasPermission(Permissions.INLINE));
+
+    #endregion
+
+    #region ReplaceVariables[Inner]
+
+    private const string VAR_GROUP = "var";
+    private string ReplaceVariables(string Code)
+    {
+        try   { return ReplaceVariablesInner(Code); }
+        catch { return Code; }
+    }
+    protected virtual string ReplaceVariablesInner(string Code) =>
+        new Regex($@"\$(?<{VAR_GROUP}>[a-zA-Z_][a-zA-Z_\d]*)")
+            .Replace(Code, (m => $"{nameof(Globals.kv)}[\"{m.Groups[VAR_GROUP].Value}\"]"));
 
     #endregion
 
     #region Handle[Inner]
 
-    protected internal bool Handle(TSPlayer? Sender, string Text, bool Force = false)
+    public bool Handle(TSPlayer? Sender, string? Text, bool CheckEnabled = true, bool CheckPermission = true)
     {
         if ((Sender is null)
                 || string.IsNullOrWhiteSpace(Text)
-                || !Sender.HasPermission(Permissions.USE)
+                || (CheckEnabled && !IsEnabled)
+                || (CheckPermission && !HasExecutePermission(Sender))
                 || !Prefixes.TryGet(Text, out string? showCode, out CodePrefix? codePrefix))
             return false;
 
-        string handleCode = $"{ReplaceCode(showCode)}{(codePrefix.AddSemicolon ? ";" : string.Empty)}";
-        _ = HandleInner(Sender, showCode, handleCode, codePrefix)
-            .ContinueWith(t => TShock.Log.ConsoleError(t.Exception?.ToString()),
+        _ = HandleInner(Sender, codePrefix, showCode,
+                        ReplaceVariables((codePrefix.AddSemicolon ? $"{showCode};" : showCode)))
+            .ContinueWith(t => TShock.Log.ConsoleError(t.Exception!.ToString()),
                           TaskContinuationOptions.OnlyOnFaulted);
         return true;
     }
-    protected virtual async Task HandleInner(TSPlayer Sender, string ShowCode,
-                                             string HandleCode, CodePrefix CodePrefix) =>
-        await CodePrefix.Handle(Sender, ShowCode, HandleCode);
+    protected virtual async Task HandleInner(TSPlayer Sender, CodePrefix CodePrefix,
+                                             string ShowCode, string HandleCode) =>
+        await CodePrefix.Handle(Sender, HandleCode, ShowCode);
 
     #endregion
-    #region ReplaceCode
 
-    private const string VAR = "var";
-    private static readonly Regex VAR_REGEX = new($@"\$(?<{VAR}>[a-zA-Z_][a-zA-Z\d_]*)");
-    protected internal virtual string ReplaceCode(string Text) =>
-        VAR_REGEX.Replace(Text, (m => $"{nameof(Configuration.Globals.kv)}[\"{m.Groups[VAR].Value}\"]"));
+    #region ReplaceInlineCode
+
+    [SuppressMessage("ReSharper", "ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract")]
+    public bool ReplaceInlineCode(TSPlayer? Sender, string? Text, [MaybeNullWhen(false)]out string NewText,
+                                  bool CheckEnabled = true, bool CheckPermission = true)
+    {
+        NewText = null;
+        if ((Sender is null)
+                || string.IsNullOrWhiteSpace(Text)
+                || (CheckEnabled && !IsInlineCodeEnabled)
+                || (CheckPermission && !HasInlinePermission(Sender)))
+            return false;
+
+        string? error;
+        try
+        {
+            if (ReplaceInlineCodeInner(Sender, Text, out NewText, out error))
+                if (NewText is null)
+                    error ??= $"[{nameof(CSharpScripting)}] Something went wrong...";
+                else if (error is not null)
+                    NewText = null;
+                else
+                    return true;
+        } catch (Exception ex) { error = ex.ToString(); }
+
+        Sender.SendErrorMessage(error);
+        return false;
+    }
+
+    #endregion
+    #region ReplaceInlineCodeInner
+
+    protected const string WITH_CODE_RETURN_GROUP = "with_code", ONLY_RETURN_CODE_GROUP = "only_code";
+    protected const string WITH_CODE_RETURN_PATTERN = $@"(?:```(?<{WITH_CODE_RETURN_GROUP}>[^`]+)```)";
+    protected const string ONLY_RETURN_CODE_PATTERN = $@"(?:``(?<{ONLY_RETURN_CODE_GROUP}>[^`]+)``)";
+    protected static readonly Regex INLINE_CODE_REGEX =
+        new(@$"{WITH_CODE_RETURN_PATTERN}|{ONLY_RETURN_CODE_PATTERN}");
+    private sealed class BreakException : Exception { }
+    protected virtual bool ReplaceInlineCodeInner(TSPlayer Sender, string Text,
+                                                  [MaybeNullWhen(false)]out string NewText,
+                                                  [MaybeNullWhen(true)]out string Error)
+    {
+        string? error = NewText = Error = null;
+        int replacements = 0;
+        try
+        {
+            (ScriptOptions options, Globals globals) = PlayerManager.Get(Sender);
+            NewText = INLINE_CODE_REGEX.Replace(Text, (m =>
+            {
+                bool withCode = m.Groups[WITH_CODE_RETURN_GROUP].Success;
+                if (!GetInlineCodeReplacement((withCode
+                                                    ? m.Groups[WITH_CODE_RETURN_GROUP].Value
+                                                    : m.Groups[ONLY_RETURN_CODE_GROUP].Value),
+                                              withCode, options, globals,
+                                              out string? replacement, out error))
+                    throw new BreakException();
+
+                replacements++;
+                return replacement;
+            }));
+            return (replacements > 0);
+        }
+        catch (BreakException)
+        {
+            Error = error!;
+            return false;
+        }
+    }
+
+    #endregion
+    #region GetInlineCodeReplacement
+
+    protected virtual bool GetInlineCodeReplacement(string Code, bool WithCode,
+                                                    ScriptOptions Options, Globals Globals,
+                                                    [MaybeNullWhen(false)]out string Replacement,
+                                                    [MaybeNullWhen(true)]out string Error)
+    {
+        Replacement = Error = null;
+        string? replacement = null, error = null;
+        string tagStart = $"[c/{CodeColor.Hex3()}:";
+        const string TAG_END = "]";
+        try
+        {
+            CSharpScript.RunAsync($"return {ReplaceVariables(Code)};", Options, Globals)
+                        .ContinueWith(t => (replacement, error) =
+                                                (ToStringNull(t.Result.ReturnValue),
+                                                 (t.Exception ?? t.Result.Exception)?.ToString()))
+                        .Wait();
+            if (error is not null)
+            {
+                Error = error;
+                return false;
+            }
+
+            string withCode =
+                (WithCode
+                     ? $"{Code.Replace(TAG_END, $"{TAG_END}{tagStart}{TAG_END}{TAG_END}{tagStart}")}: "
+                     : string.Empty);
+            Replacement = $"{tagStart}`{withCode}{replacement}`{TAG_END}";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Error = (error ?? ex.ToString());
+            return false;
+        }
+    }
+
+    #endregion
+
+
+
+    #region ToString
+
+    public override string ToString() => $"{GetType().Name} [" +
+                                         $"Initialized: {IsInitialized}; " +
+                                         $"Enabled: {IsEnabled}; " +
+                                         $"Inline code enabled: {IsOnlyInlineCodeEnabled}; " +
+                                         $"Prefixes: {Prefixes}; " +
+                                         $"Code color: {CodeColor}]";
 
     #endregion
 }

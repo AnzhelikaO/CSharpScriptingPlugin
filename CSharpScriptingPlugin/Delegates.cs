@@ -1,13 +1,28 @@
-﻿#region Using
+﻿namespace CSharpScripting.Configuration.Delegates;
 
-using CSharpScripting.Configuration.Prefixes;
+public delegate CodeManager PreSetCodeManagerD(CodeManager Manager);
+public delegate void PostSetCodeManagerD(CodeManager Manager, bool IsInitialized);
 
-#endregion
-namespace CSharpScripting.Configuration.Delegates;
+public delegate bool PreToggleD(CodeManager Manager, bool Enable, bool FromInitializeOrDispose);
+public delegate void PostToggleD(CodeManager Manager, bool Success,
+                                 bool Enable, bool FromInitializeOrDispose);
 
-public delegate CodeManager? SetManagerD(CodeManager? Manager);
-public delegate CodePrefix? RegisterCodePrefixD(CodePrefix? Manager);
-public delegate bool DeregisterCodePrefixD(CodePrefix? Manager);
-public delegate dynamic? TransformDictionaryD(Dictionary<dynamic, dynamic> Dictionary);
-public delegate dynamic? GetSetValueD(dynamic? Key, dynamic? Value);
-public delegate bool ClearD(bool Force);
+
+
+public delegate CodePrefix? PreRegisterCodePrefixD(CodePrefix? Prefix);
+public delegate void PostRegisterCodePrefixD(bool Success, CodePrefix Prefix);
+
+public delegate bool PreDeregisterCodePrefixD(CodePrefix? Prefix);
+public delegate void PostDeregisterCodePrefixD(bool Success, CodePrefix Prefix);
+
+
+
+public delegate dynamic? TransformDictionaryD(Dictionary<dynamic, dynamic?> Dictionary);
+
+public delegate void GetValuesD(TransformDictionaryD? Transform, dynamic?[]? Keys,
+                                Dictionary<dynamic, dynamic?> NoTransformValues,
+                                ref dynamic? TransformedValues);
+public delegate bool SetValuesD(dynamic?[]? Keys, dynamic?[] Values);
+
+public delegate bool PreClearDictionaryD(bool Force);
+public delegate void PostClearDictionaryD(bool Success, bool Force);

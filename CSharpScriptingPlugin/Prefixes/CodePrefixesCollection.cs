@@ -1,12 +1,4 @@
-﻿#region Using
-
-using System.Collections;
-using System.Collections.Concurrent;
-using System.Reflection;
-using CSharpScripting.Configuration.Delegates;
-
-#endregion
-namespace CSharpScripting.Configuration.Prefixes;
+﻿namespace CSharpScripting.Configuration.Prefixes;
 
 public sealed class CodePrefixesCollection
     : IReadOnlyDictionary<string, CodePrefix>,
@@ -17,14 +9,33 @@ public sealed class CodePrefixesCollection
       IEnumerable<CodePrefix>,
       IEnumerable
 {
-    private readonly ConcurrentDictionary<string, CodePrefix> _Prefixes = new();
-    public RegisterCodePrefixD? OnRegister;
-    public DeregisterCodePrefixD? OnDeregister;
-    public IEnumerable<CodePrefix> Sorted => _Prefixes.Values.OrderByDescending(p => p.Prefix.Length);
-    public int Count => _Prefixes.Count;
-    #region .Constructor
-    // ReSharper disable once MergeIntoPattern
+    #region InstanceEvents
 
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    public sealed class InstanceEvents
+    {
+        public event PreRegisterCodePrefixD? PreRegister;
+        public event PostRegisterCodePrefixD? PostRegister;
+        public event PreDeregisterCodePrefixD? PreDeregister;
+        public event PostDeregisterCodePrefixD? PostDeregister;
+
+        internal PreRegisterCodePrefixD? _PreRegister => PreRegister;
+        internal PostRegisterCodePrefixD? _PostRegister => PostRegister;
+        internal PreDeregisterCodePrefixD? _PreDeregister => PreDeregister;
+        internal PostDeregisterCodePrefixD? _PostDeregister => PostDeregister;
+
+        internal InstanceEvents() { }
+    }
+
+    #endregion
+
+    private readonly ConcurrentDictionary<string, CodePrefix> Prefixes = new();
+    public IEnumerable<CodePrefix> Sorted => Prefixes.Values.OrderByDescending(p => p.Prefix.Length);
+    public int Count => Prefixes.Count;
+    public InstanceEvents Events { get; } = new();
+    #region .Constructor
+
+    [SuppressMessage("ReSharper", "MergeIntoPattern")]
     internal CodePrefixesCollection()
     {
         foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
@@ -37,61 +48,6 @@ public sealed class CodePrefixesCollection
                     && (Activator.CreateInstance(type, nonPublic: true) is CodePrefix prefix)
                     && prefix.Register)
                 Register(prefix);
-    }
-
-    // ReSharper restore MergeIntoPattern
-    #endregion
-
-    #region Register
-
-    public bool Register([MaybeNull]CodePrefix Prefix)
-    {
-        ArgumentNullException.ThrowIfNull(Prefix);
-        if (OnRegister is RegisterCodePrefixD onRegister)
-            Prefix = onRegister(Prefix);
-        return ((Prefix is not null) && _Prefixes.TryAdd(Prefix.Prefix, Prefix));
-    }
-
-    #endregion
-    #region Deregister
-
-    [PublicAPI]
-    public bool Deregister(CodePrefix Prefix)
-    {
-        ArgumentNullException.ThrowIfNull(Prefix);
-        return (((OnDeregister is not DeregisterCodePrefixD onDeregister) || onDeregister(Prefix))
-                && _Prefixes.TryRemove(Prefix.Prefix, out _));
-    }
-
-    #endregion
-    #region Contains
-
-    public bool Contains([NotNullWhen(true)]string? Prefix) =>
-        ((Prefix is not null) && _Prefixes.ContainsKey(Prefix));
-
-    #endregion
-    #region TryGet
-
-    public bool TryGet([NotNullWhen(true)]string? Prefix, [MaybeNullWhen(false)]out CodePrefix CodePrefix)
-    {
-        CodePrefix = null;
-        return ((Prefix is not null) && _Prefixes.TryGetValue(Prefix, out CodePrefix));
-    }
-    public bool TryGet([NotNullWhen(true)]string? Input,
-                       [MaybeNullWhen(false)]out string Code,
-                       [MaybeNullWhen(false)]out CodePrefix CodePrefix)
-    {
-        (Code, CodePrefix, Input) = (null, null, Input?.Trim());
-        if (string.IsNullOrWhiteSpace(Input))
-            return false;
-
-        string lowerInput = Input.ToLower();
-        CodePrefix = Sorted.FirstOrDefault(p => lowerInput.StartsWith(p.Prefix));
-        if (CodePrefix is null)
-            return false;
-        
-        Code = Input[CodePrefix.Prefix.Length..].Trim();
-        return true;
     }
 
     #endregion
@@ -136,16 +92,89 @@ public sealed class CodePrefixesCollection
             return new(prefix.Prefix, prefix);
         }
     }
-    
+
+    #endregion
+
+    #region Register
+
+    public bool Register([NotNullWhen(true)]CodePrefix? Prefix)
+    {
+        if (Prefix is null)
+            return false;
+
+        CodePrefix saved = Prefix;
+        if (Events._PreRegister is PreRegisterCodePrefixD onRegister)
+            Prefix = onRegister(Prefix);
+        if ((Prefix is not null) && Prefixes.TryAdd(Prefix.Prefix, Prefix))
+        {
+            Events._PostRegister?.Invoke(Success: true, Prefix);
+            return true;
+        }
+        else
+        {
+            Events._PostRegister?.Invoke(Success: false, (Prefix ?? saved));
+            return false;
+        }
+    }
+
+    #endregion
+    #region Deregister
+
+    [PublicAPI]
+    public bool Deregister([NotNullWhen(true)]CodePrefix? Prefix)
+    {
+        if (Prefix is null)
+            return false;
+
+        bool success = (((Events._PreDeregister is not PreDeregisterCodePrefixD onDeregister)
+                                || onDeregister(Prefix))
+                            && Prefixes.TryRemove(Prefix.Prefix, out _));
+        Events._PostDeregister?.Invoke(success, Prefix);
+        return success;
+    }
+
+    #endregion
+    #region Contains
+
+    public bool Contains([NotNullWhen(true)]string? Prefix) =>
+        ((Prefix is not null) && Prefixes.ContainsKey(Prefix));
+
+    #endregion
+    #region TryGet
+
+    public bool TryGet([NotNullWhen(true)]string? Prefix, [MaybeNullWhen(false)]out CodePrefix CodePrefix)
+    {
+        CodePrefix = null;
+        return ((Prefix is not null) && Prefixes.TryGetValue(Prefix, out CodePrefix));
+    }
+    public bool TryGet([NotNullWhen(true)]string? Input,
+                       [MaybeNullWhen(false)]out string Code,
+                       [MaybeNullWhen(false)]out CodePrefix CodePrefix)
+    {
+        (Input, Code, CodePrefix) = (Input?.Trim(), null, null);
+        if (string.IsNullOrWhiteSpace(Input))
+            return false;
+
+        string lowerInput = Input.ToLower();
+        CodePrefix = Sorted.FirstOrDefault(p => lowerInput.StartsWith(p.Prefix));
+        if (CodePrefix is null)
+            return false;
+
+        Code = Input[CodePrefix.Prefix.Length..].Trim();
+        return true;
+    }
+
     #endregion
 
     #region GetEnumerator
 
-    public IEnumerator<CodePrefix> GetEnumerator() => _Prefixes.Values.GetEnumerator();
+    public IEnumerator<CodePrefix> GetEnumerator() => Sorted.GetEnumerator();
     IEnumerator<KeyValuePair<string, CodePrefix>>
-        IEnumerable<KeyValuePair<string, CodePrefix>>.GetEnumerator() => _Prefixes.GetEnumerator();
-    IEnumerator IEnumerable.GetEnumerator() => _Prefixes.Values.GetEnumerator();
-    
+        IEnumerable<KeyValuePair<string, CodePrefix>>.GetEnumerator() =>
+        Sorted.Select(p => new KeyValuePair<string, CodePrefix>(p.Prefix, p))
+              .GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => Sorted.GetEnumerator();
+
     #endregion
     #region Interface realizations
 
