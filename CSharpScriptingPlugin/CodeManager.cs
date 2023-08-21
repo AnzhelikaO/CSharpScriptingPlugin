@@ -542,7 +542,6 @@ public class CodeManager
                                                   [MaybeNullWhen(true)]out string Error)
     {
         string? error = NewText = Error = null;
-        int replacements = 0;
         try
         {
             (ScriptOptions options, Globals globals) = PlayerManager.Get(Sender);
@@ -556,10 +555,9 @@ public class CodeManager
                                               out string? replacement, out error))
                     throw new BreakException();
 
-                replacements++;
                 return replacement;
             }));
-            return (replacements > 0);
+            return true;
         }
         catch (BreakException)
         {
@@ -597,7 +595,7 @@ public class CodeManager
                 (WithCode
                      ? $"{Code.Replace(TAG_END, $"{TAG_END}{tagStart}{TAG_END}{TAG_END}{tagStart}")}: "
                      : string.Empty);
-            Replacement = $"{tagStart}`{withCode}{replacement}`{TAG_END}";
+            Replacement = $"{tagStart}❮{withCode}{replacement}❯{TAG_END}";
             return true;
         }
         catch (Exception ex)
