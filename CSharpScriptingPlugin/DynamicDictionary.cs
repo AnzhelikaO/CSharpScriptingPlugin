@@ -40,7 +40,7 @@ public sealed class DynamicDictionary
 
     #region operator[]
 #pragma warning disable CS8619 // dynamic does not work well with nullability
-
+    
     public dynamic? this[params dynamic?[]? Keys]
     {
         get

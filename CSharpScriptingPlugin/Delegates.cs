@@ -2,6 +2,7 @@
 
 public delegate CodeManager PreSetCodeManagerD(CodeManager Manager);
 public delegate void PostSetCodeManagerD(CodeManager Manager, bool IsInitialized);
+public delegate ScriptOptions GetScriptOptionsD(ScriptOptions Options);
 
 public delegate bool PreToggleD(CodeManager Manager, bool Enable, bool FromInitializeOrDispose);
 public delegate void PostToggleD(CodeManager Manager, bool Success,

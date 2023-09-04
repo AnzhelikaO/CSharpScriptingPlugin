@@ -1,13 +1,7 @@
 ﻿namespace CSharpScripting.Configuration.Prefixes;
 
-public sealed class CodePrefixesCollection
-    : IReadOnlyDictionary<string, CodePrefix>,
-      IReadOnlyList<KeyValuePair<string, CodePrefix>>,
-      IReadOnlyList<CodePrefix>,
-      IReadOnlyCollection<KeyValuePair<string, CodePrefix>>,
-      IEnumerable<KeyValuePair<string, CodePrefix>>,
-      IEnumerable<CodePrefix>,
-      IEnumerable
+public sealed class CodePrefixesCollection : IReadOnlyDictionary<string, CodePrefix>,
+                                             IReadOnlyCollection<CodePrefix>
 {
     #region InstanceEvents
 
@@ -34,25 +28,36 @@ public sealed class CodePrefixesCollection
     public int Count => Prefixes.Count;
     public InstanceEvents Events { get; } = new();
     #region .Constructor
-
-    [SuppressMessage("ReSharper", "MergeIntoPattern")]
+    
     internal CodePrefixesCollection()
     {
         foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
-            if (!type.IsAbstract
-                    && type.IsSubclassOf(typeof(CodePrefix))
-                    && type.GetConstructors(BindingFlags.Public
-                                          | BindingFlags.NonPublic
-                                          | BindingFlags.Instance)
-                           .Any(c => !c.GetParameters().Any())
-                    && (Activator.CreateInstance(type, nonPublic: true) is CodePrefix prefix)
-                    && prefix.Register)
+            if (IsPrefixType(type) && GetPrefix(type, out CodePrefix? prefix))
                 Register(prefix);
+
+        #region IsPrefixType
+
+        static bool IsPrefixType(Type Type) =>
+            (!Type.IsAbstract
+                && Type.IsSubclassOf(typeof(CodePrefix))
+                && Type.GetConstructors(BindingFlags.Public
+                                      | BindingFlags.NonPublic
+                                      | BindingFlags.Instance)
+                       .Any(c => !c.GetParameters().Any()));
+
+        #endregion
+        #region GetPrefix
+
+        static bool GetPrefix(Type Type, [MaybeNullWhen(false)]out CodePrefix Prefix) =>
+            (((Prefix = (Activator.CreateInstance(Type, nonPublic: true) as CodePrefix)) is not null)
+                && Prefix.Register);
+
+        #endregion
     }
 
     #endregion
 
-    #region operator[] (Prefix)
+    #region operator[]
 
     public CodePrefix this[string Prefix]
     {
@@ -62,34 +67,6 @@ public sealed class CodePrefixesCollection
             if (!TryGet(Prefix, out CodePrefix? codePrefix))
                 throw new KeyNotFoundException($"Invalid prefix \"{Prefix}\".");
             return codePrefix;
-        }
-    }
-
-    #endregion
-    #region operator[] (Index)
-
-    public CodePrefix this[int Index]
-    {
-        get
-        {
-            if (Index < 0)
-                throw new ArgumentOutOfRangeException(
-                    nameof(Index), Index,
-                    $"{nameof(Index)} must be greater than or equal to 0, {Index} given.");
-            CodePrefix[] prefixes = Sorted.ToArray();
-            if (Index >= prefixes.Length)
-                throw new ArgumentOutOfRangeException(
-                    nameof(Index), Index,
-                    $"{nameof(Index)} must be less than {prefixes.Length}, {Index} given.");
-            return prefixes[Index];
-        }
-    }
-    KeyValuePair<string, CodePrefix> IReadOnlyList<KeyValuePair<string, CodePrefix>>.this[int Index]
-    {
-        get
-        {
-            CodePrefix prefix = this[Index];
-            return new(prefix.Prefix, prefix);
         }
     }
 
@@ -169,10 +146,9 @@ public sealed class CodePrefixesCollection
     #region GetEnumerator
 
     public IEnumerator<CodePrefix> GetEnumerator() => Sorted.GetEnumerator();
-    IEnumerator<KeyValuePair<string, CodePrefix>>
-        IEnumerable<KeyValuePair<string, CodePrefix>>.GetEnumerator() =>
-        Sorted.Select(p => new KeyValuePair<string, CodePrefix>(p.Prefix, p))
-              .GetEnumerator();
+    IEnumerator<KeyValuePair<string, CodePrefix>> IEnumerable<KeyValuePair<string, CodePrefix>>.
+        GetEnumerator() => Sorted.Select(p => new KeyValuePair<string, CodePrefix>(p.Prefix, p))
+                                 .GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => Sorted.GetEnumerator();
 
     #endregion

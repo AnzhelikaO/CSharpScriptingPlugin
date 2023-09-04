@@ -2,8 +2,9 @@
 
 global using CSharpScripting.Configuration;
 global using CSharpScripting.Configuration.Delegates;
-global using CSharpScripting.Configuration.PlayerManagers;
 global using CSharpScripting.Configuration.Prefixes;
+global using CSharpScripting.Environments;
+global using Lokad.ILPack;
 global using Microsoft.CodeAnalysis;
 global using Microsoft.CodeAnalysis.CSharp;
 global using Microsoft.CodeAnalysis.CSharp.Scripting;
@@ -24,7 +25,9 @@ global using Plugin = CSharpScripting.TShockPlugin.Plugin;
 global using PublicAPIAttribute = JetBrains.Annotations.PublicAPIAttribute;
 global using UsedImplicitlyAttribute = JetBrains.Annotations.UsedImplicitlyAttribute;
 global using Color = Microsoft.Xna.Framework.Color;
+global using TypeInfo = System.Reflection.TypeInfo;
 using System.ComponentModel;
+using TShockAPI.Hooks;
 
 #endregion
 namespace CSharpScripting.TShockPlugin;
@@ -89,25 +92,39 @@ public sealed class Plugin : TerrariaPlugin
     #endregion
     #region .Constructor
 
-    public Plugin(Main Game) : base(Game) => _Instance = this;
-
-    #endregion
-
-    #region RegisterHooks
-
-    internal static void RegisterHooks()
+    public Plugin(Main Game) : base(Game)
     {
-        ServerApi.Hooks.ServerChat.Register(Instance, OnServerChat);
-        ServerApi.Hooks.ServerCommand.Register(Instance, OnServerCommand);
+        _Instance = this;
+        //System.Diagnostics.Debugger.Launch();
     }
 
     #endregion
-    #region DeregisterHooks
 
-    internal static void DeregisterHooks()
+    #region RegisterPlugin
+
+    internal static void RegisterPlugin()
     {
+        AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
+        ServerApi.Hooks.ServerJoin.Register(Instance, OnServerJoin);
+        ServerApi.Hooks.ServerLeave.Register(Instance, OnServerLeave, priority: 1);
+        ServerApi.Hooks.ServerChat.Register(Instance, OnServerChat);
+        ServerApi.Hooks.ServerCommand.Register(Instance, OnServerCommand);
+        PlayerHooks.PlayerPostLogin += OnPlayerPostLogin;
+        Commands.ChatCommands.Add(CSSCommand.Instance);
+    }
+    
+    #endregion
+    #region DeregisterPlugin
+
+    internal static void DeregisterPlugin()
+    {
+        AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve;
+        ServerApi.Hooks.ServerJoin.Deregister(Instance, OnServerJoin);
+        ServerApi.Hooks.ServerLeave.Deregister(Instance, OnServerLeave);
         ServerApi.Hooks.ServerChat.Deregister(Instance, OnServerChat);
         ServerApi.Hooks.ServerCommand.Deregister(Instance, OnServerCommand);
+        PlayerHooks.PlayerPostLogin -= OnPlayerPostLogin;
+        Commands.ChatCommands.Remove(CSSCommand.Instance);
     }
 
     #endregion
@@ -134,6 +151,38 @@ public sealed class Plugin : TerrariaPlugin
 
     #endregion
 
+    #region OnAssemblyResolve
+
+    private static Assembly? OnAssemblyResolve(object? _, ResolveEventArgs Args) =>
+        (CodeManager.Manager.AssemblyResolve.TryGetValue(Args.Name, out Assembly? assembly)
+             ? assembly
+             : null);
+
+    #endregion
+    #region OnServerJoin
+
+    private static void OnServerJoin(JoinEventArgs Args)
+    {
+        if (TShock.Players[Args.Who] is TSPlayer player)
+            CodeManager.Manager.Environments[player] = new(player);
+    }
+
+    #endregion
+    #region OnServerLeave
+
+    private static void OnServerLeave(LeaveEventArgs Args)
+    {
+        if (TShock.Players[Args.Who] is TSPlayer player)
+            CodeManager.Manager.Environments[player] = null;
+    }
+
+    #endregion
+    #region OnPlayerPostLogin
+
+    private static void OnPlayerPostLogin(PlayerPostLoginEventArgs Args) =>
+        CodeManager.Manager.Environments[Args.Player] = new(Args.Player);
+
+    #endregion
     #region OnServerChat
 
     private static void OnServerChat(ServerChatEventArgs Args) =>

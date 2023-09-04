@@ -6,8 +6,6 @@ public abstract class CodePrefix
 
     internal virtual bool Register => true;
     protected internal virtual bool AddSemicolon => true;
-    protected virtual bool ShowInputToSender => true;
-    protected virtual bool ShowInputToAdmins => true;
     #region Prefix[Inner]
 
     private string? _Prefix;
@@ -18,18 +16,20 @@ public abstract class CodePrefix
 
     #region Handle
 
-    public async Task Handle(TSPlayer Sender, string HandleCode, string? ShowCode = null)
+    public async Task Handle(TSPlayer Sender, CSEnvironment Environment,
+                             string HandleCode, string? ShowCode = null)
     {
         ArgumentNullException.ThrowIfNull(Sender);
+        ArgumentNullException.ThrowIfNull(Environment);
         ArgumentNullException.ThrowIfNull(HandleCode);
         ShowCode ??= HandleCode;
 
         try
         {
             CodeManager manager = CodeManager.Manager;
-            (ScriptOptions options, Globals globals) = manager.PlayerManager.Get(Sender);
-            await ShowInput(Sender, ShowCode, manager);
-            await HandleInner(Sender, HandleCode, manager, options, globals);
+            (string @using, ScriptOptions options, Globals globals) = Environment;
+            await ShowInput(Sender, Environment, ShowCode, manager, options, globals);
+            await HandleInner(Sender, Environment, @using, HandleCode, manager, options, globals);
         }
         catch (Exception exception)
         {
@@ -41,53 +41,58 @@ public abstract class CodePrefix
 
     #region ShowInput[Inner]
 
-    private async Task ShowInput(TSPlayer Sender, string Code, CodeManager CodeManager)
+    [SuppressMessage("ReSharper", "EmptyGeneralCatchClause")]
+    private async Task ShowInput(TSPlayer Sender, CSEnvironment Environment, string Code,
+                                 CodeManager CodeManager, ScriptOptions Options, Globals Globals)
     {
-        bool toSender = ShowInputToSender, toAdmins = ShowInputToAdmins;
-        if (!toSender && !toAdmins)
-            return;
-
-        TSPlayer[] admins = Globals.admins;
-        string text = $"{Prefix}{Code}";
-        if (toAdmins)
-            foreach (TSPlayer plr in admins)
-                plr.SendMessage(text, CodeManager.CodeColor);
-        if (toSender && (!toAdmins || !admins.Contains(Sender)))
-            Sender.SendMessage(text, CodeManager.CodeColor);
-
-        await ShowInputInner(Sender, Code, CodeManager);
+        try { await ShowInputInner(Sender, Environment, Code, CodeManager, Options, Globals); }
+        catch { }
     }
-    protected virtual Task ShowInputInner(TSPlayer Sender, string Code, CodeManager CodeManager) =>
-        Task.CompletedTask;
+    protected virtual Task ShowInputInner(TSPlayer Sender, CSEnvironment Environment, string Code,
+                                          CodeManager CodeManager, ScriptOptions Options, Globals Globals)
+    {
+        string text = $"{Prefix}{Code}";
+        foreach (TSPlayer plr in GetShowInputPlayers(Sender, Environment, CodeManager, Options, Globals))
+            plr.SendMessage(text, CodeManager.CodeColor);
+        return Task.CompletedTask;
+    }
+
+    #endregion
+    #region GetShowInputPlayers[Inner]
+
+    protected IEnumerable<TSPlayer> GetShowInputPlayers(
+        TSPlayer Sender, CSEnvironment Environment, CodeManager CodeManager,
+        ScriptOptions Options, Globals Globals)
+    {
+        if (GetShowInputPlayersInner(Sender, Environment, CodeManager, Options,
+                                     Globals) is IEnumerable<TSPlayer?> players)
+            foreach (TSPlayer? player in players)
+                if (player is not null)
+                    yield return player;
+    }
+    protected virtual IEnumerable<TSPlayer> GetShowInputPlayersInner(
+            TSPlayer Sender, CSEnvironment Environment, CodeManager CodeManager,
+            ScriptOptions Options, Globals Globals) =>
+        Globals.admins.Append(Globals.me);
 
     #endregion
     #region HandleInner
 
-    protected abstract Task HandleInner(TSPlayer Sender, string Code, CodeManager CodeManager,
+    protected abstract Task HandleInner(TSPlayer Sender, CSEnvironment Environment,
+                                        string Using, string Code, CodeManager CodeManager,
                                         ScriptOptions Options, Globals Globals);
 
     #endregion
 
-    #region Equals
+    #region Equals, GetHashCode, ToString
 
     public override bool Equals(object? Object) =>
         ((Object is CodePrefix prefix)
             && (prefix.GetType() == GetType())
             && (prefix.Register == Register)
             && (prefix.AddSemicolon == AddSemicolon)
-            && (prefix.ShowInputToSender == ShowInputToSender)
-            && (prefix.ShowInputToAdmins == ShowInputToAdmins)
             && (prefix.Prefix == Prefix));
-
-    #endregion
-    #region GetHashCode
-
-    public override int GetHashCode() =>
-        HashCode.Combine(Register, AddSemicolon, ShowInputToSender, ShowInputToAdmins, Prefix);
-
-    #endregion
-    #region ToString
-
+    public override int GetHashCode() => HashCode.Combine(Register, AddSemicolon, Prefix);
     public override string ToString() => Prefix;
 
     #endregion

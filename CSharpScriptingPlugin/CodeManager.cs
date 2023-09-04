@@ -9,9 +9,11 @@ public class CodeManager
     {
         public static event PreSetCodeManagerD? PreSet;
         public static event PostSetCodeManagerD? PostSet;
+        public static event GetScriptOptionsD? GetOptions;
 
         internal static PreSetCodeManagerD? _PreSet => PreSet;
         internal static PostSetCodeManagerD? _PostSet => PostSet;
+        internal static GetScriptOptionsD? _GetOptions => GetOptions;
     }
     [SuppressMessage("ReSharper", "InconsistentNaming")]
     public sealed class InstanceEvents
@@ -68,7 +70,7 @@ public class CodeManager
                 ApplyScriptOptionsImports(ref op);
                 _DefaultOptions = op;
             }
-            return _DefaultOptions;
+            return GetFinalOptions();
 
             #region GetBaseScriptOptions
 
@@ -173,9 +175,19 @@ public class CodeManager
                                              GetNamespace(nameof(TShockAPI)),
                                              GetNamespace(nameof(CSharpScripting)));
 
-                static string GetNamespace(string _, [CallerArgumentExpression("_")]string Name = "") =>
-                    Name[7..^1];
+                [SuppressMessage("ReSharper", "UnusedParameter.Local")]
+                static string GetNamespace(
+                    string _, [CallerArgumentExpression(nameof(_))]string Name = "") => Name[7..^1];
             }
+
+            #endregion
+            #region GetFinalOptions
+
+            static ScriptOptions GetFinalOptions() =>
+                ((StaticEvents._GetOptions is GetScriptOptionsD getOptions)
+                        && (getOptions(_DefaultOptions!) is ScriptOptions newOp))
+                    ? newOp
+                    : _DefaultOptions!;
 
             #endregion
         }
@@ -188,9 +200,10 @@ public class CodeManager
     public bool IsEnabled { get; private set; }
     protected bool IsOnlyInlineCodeEnabled { get; private set; }
     public bool IsInlineCodeEnabled => (IsEnabled && IsOnlyInlineCodeEnabled);
+    internal readonly ConcurrentDictionary<string, Assembly> AssemblyResolve = new();
 
     public CodePrefixesCollection Prefixes { get; } = new();
-    public PlayerManager PlayerManager { get; } = new();
+    public CSEnvironments Environments { get; } = new();
     public virtual Color CodeColor => Color.HotPink;
     public InstanceEvents Events { get; } = new();
     #region .Constructor
@@ -228,7 +241,7 @@ public class CodeManager
 
     protected virtual void InitializeInner()
     {
-        (ScriptOptions options, Globals globals) = PlayerManager.Get(TSPlayer.Server);
+        (ScriptOptions options, Globals globals) = Environments[TSPlayer.Server];
         CSharpScript.RunAsync($"{nameof(Globals.cw)}(\"Code manager initialized.\")", options, globals)
                     .Wait();
     }
@@ -272,7 +285,7 @@ public class CodeManager
 
     protected virtual bool EnableInner(bool FromInitialize)
     {
-        RegisterHooks();
+        RegisterPlugin();
         EnableInlineCode(FromInitialize);
         return true;
     }
@@ -317,7 +330,7 @@ public class CodeManager
     protected virtual bool DisableInner(bool FromDispose) => _Disable(FromDispose);
     private bool _Disable(bool FromDispose)
     {
-        DeregisterHooks();
+        DeregisterPlugin();
         DisableInlineCode(FromDispose);
         return true;
     }
@@ -394,13 +407,13 @@ public class CodeManager
 
     #endregion
 
-    #region RegisterHooks
+    #region RegisterPlugin
 
-    protected bool RegisterHooks()
+    protected bool RegisterPlugin()
     {
         try
         {
-            RegisterHooksInner();
+            RegisterPluginInner();
             return true;
         }
         catch (Exception ex)
@@ -411,22 +424,22 @@ public class CodeManager
     }
 
     #endregion
-    #region RegisterHooksInner
+    #region RegisterPluginInner
 
-    protected virtual bool RegisterHooksInner()
+    protected virtual bool RegisterPluginInner()
     {
-        Plugin.RegisterHooks();
+        Plugin.RegisterPlugin();
         return true;
     }
 
     #endregion
-    #region DeregisterHooks
+    #region DeregisterPlugin
 
-    protected bool DeregisterHooks()
+    protected bool DeregisterPlugin()
     {
         try
         {
-            DeregisterHooksInner();
+            DeregisterPluginInner();
             return true;
         }
         catch (Exception ex)
@@ -437,11 +450,11 @@ public class CodeManager
     }
 
     #endregion
-    #region DeregisterHooksInner
+    #region DeregisterPluginInner
 
-    protected virtual bool DeregisterHooksInner()
+    protected virtual bool DeregisterPluginInner()
     {
-        Plugin.DeregisterHooks();
+        Plugin.DeregisterPlugin();
         return true;
     }
 
@@ -465,37 +478,40 @@ public class CodeManager
     #region ReplaceVariables[Inner]
 
     private const string VAR_GROUP = "var";
+    private static readonly Regex VAR_REGEX = new($@"\$(?<{VAR_GROUP}>[a-zA-Z_][a-zA-Z_\d]*)");
     private string ReplaceVariables(string Code)
     {
-        try   { return ReplaceVariablesInner(Code); }
+        try { return ReplaceVariablesInner(Code); }
         catch { return Code; }
     }
     protected virtual string ReplaceVariablesInner(string Code) =>
-        new Regex($@"\$(?<{VAR_GROUP}>[a-zA-Z_][a-zA-Z_\d]*)")
-            .Replace(Code, (m => $"{nameof(Globals.kv)}[\"{m.Groups[VAR_GROUP].Value}\"]"));
+        VAR_REGEX.Replace(Code, (m => $"{nameof(Globals.kv)}[\"{m.Groups[VAR_GROUP].Value}\"]"));
 
     #endregion
 
     #region Handle[Inner]
 
+    [SuppressMessage("ReSharper", "MergeIntoNegatedPattern")]
     public bool Handle(TSPlayer? Sender, string? Text, bool CheckEnabled = true, bool CheckPermission = true)
     {
         if ((Sender is null)
                 || string.IsNullOrWhiteSpace(Text)
                 || (CheckEnabled && !IsEnabled)
                 || (CheckPermission && !HasExecutePermission(Sender))
+                || (Environments[Sender] is not CSEnvironment env)
+                || !env.IsReady
                 || !Prefixes.TryGet(Text, out string? showCode, out CodePrefix? codePrefix))
             return false;
-
-        _ = HandleInner(Sender, codePrefix, showCode,
+        
+        _ = HandleInner(Sender, env, codePrefix, showCode,
                         ReplaceVariables((codePrefix.AddSemicolon ? $"{showCode};" : showCode)))
             .ContinueWith(t => TShock.Log.ConsoleError(t.Exception!.ToString()),
                           TaskContinuationOptions.OnlyOnFaulted);
         return true;
     }
-    protected virtual async Task HandleInner(TSPlayer Sender, CodePrefix CodePrefix,
-                                             string ShowCode, string HandleCode) =>
-        await CodePrefix.Handle(Sender, HandleCode, ShowCode);
+    protected virtual async Task HandleInner(TSPlayer Sender, CSEnvironment Environment,
+                                             CodePrefix CodePrefix, string ShowCode, string HandleCode) =>
+        await CodePrefix.Handle(Sender, Environment, HandleCode, ShowCode);
 
     #endregion
 
@@ -544,7 +560,7 @@ public class CodeManager
         string? error = NewText = Error = null;
         try
         {
-            (ScriptOptions options, Globals globals) = PlayerManager.Get(Sender);
+            (string @using, ScriptOptions options, Globals globals) = Environments[Sender];
             NewText = INLINE_CODE_REGEX.Replace(Text, (m =>
             {
                 bool withCode = m.Groups[WITH_CODE_RETURN_GROUP].Success;

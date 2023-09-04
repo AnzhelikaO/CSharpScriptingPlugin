@@ -10,7 +10,7 @@ internal static class Helpers
     #region ValidateConstant
 
     public static T ValidateConstant<T>(T Constant, T? Previous,
-                                        [CallerArgumentExpression("Constant")]string? Name = null)
+                                        [CallerArgumentExpression(nameof(Constant))]string? Name = null)
     {
         ArgumentNullException.ThrowIfNull(Constant, Name);
         if ((Constant is string constant) && (string.IsNullOrWhiteSpace(constant)))

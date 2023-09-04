@@ -1,11 +1,11 @@
 ﻿namespace CSharpScripting.Configuration;
 
-[SuppressMessage("ReSharper", "InconsistentNaming")]
-public record Globals
+[PublicAPI, SuppressMessage("ReSharper", "InconsistentNaming")]
+public class Globals
 {
     #region me
 
-    private TSPlayer _me;
+    private TSPlayer _me = null!;
     public TSPlayer me
     {
         get => _me;
@@ -26,13 +26,14 @@ public record Globals
               .ToArray();
 
     #endregion
-    [PublicAPI]public static TSPlayer players => TSPlayer.All;
-    [PublicAPI]public static TSPlayer server => TSPlayer.Server;
-    [PublicAPI]public static readonly TSPlayer[] all = new[] { players, server };
+    public static TSPlayer players => TSPlayer.All;
+    public static TSPlayer server => TSPlayer.Server;
+    public static readonly TSPlayer[] all = new[] { players, server };
 
-    [PublicAPI]public static readonly TransformDictionaryD varr, vlist, vtuple;
-    [PublicAPI]public readonly DynamicDictionary kv = new();
-    #region [.].Constructor
+    public static readonly TransformDictionaryD varr, vlist, vtuple;
+    public DynamicDictionary kv { get; private set; } = new();
+    internal MetadataReference? FromScriptReference;
+    #region ..Constructor
 
     static Globals()
     {
@@ -46,6 +47,20 @@ public record Globals
         {
             const int MAX_TUPLE_ELEMENTS = 8;
             List<List<dynamic>> elements = new() { new(MAX_TUPLE_ELEMENTS) };
+
+            for (int i = 0, a = 1; i < Elements.Count; i++, a++)
+            {
+                if (a >= MAX_TUPLE_ELEMENTS)
+                {
+                    elements.Add(new(MAX_TUPLE_ELEMENTS));
+                    a = 1;
+                }
+                elements[^1].Add(Elements[i]);
+            }
+            for (int i = (elements.Count - 1); i >= 1; i--)
+                elements[i - 1].Add(Create(i));
+            return Create(0);
+            
             #region Create
 
             dynamic Create(int Index) =>
@@ -66,31 +81,40 @@ public record Globals
                 .Invoke(elements[Index].ToArray());
 
             #endregion
-
-            for (int i = 0, a = 1; i < Elements.Count; i++, a++)
-            {
-                if (a >= MAX_TUPLE_ELEMENTS)
-                {
-                    elements.Add(new(MAX_TUPLE_ELEMENTS));
-                    a = 1;
-                }
-                elements[^1].Add(Elements[i]);
-            }
-            for (int i = (elements.Count - 1); i >= 1; i--)
-                elements[i - 1].Add(Create(i));
-            return Create(0);
         }
 
         #endregion
     }
-    public Globals(TSPlayer Me)
+
+    #endregion
+    #region .Constructor
+
+    protected Globals() { }
+    public Globals(TSPlayer Me) : this()
     {
         ArgumentNullException.ThrowIfNull(Me);
         _me = Me;
     }
+    public Globals(Globals Base) : this() => CopyFrom(Base);
 
     #endregion
 
+    #region CopyFrom
+    
+    protected void CopyFrom(Globals Base)
+    {
+        ArgumentNullException.ThrowIfNull(Base);
+        (_me, kv) = (Base._me, Base.kv);
+    }
+
+    #endregion
+    #region CopyFromPrevious
+
+    internal const string COPY_FROM_PREVIOUS = nameof(CopyFromPrevious);
+    protected void CopyFromPrevious(long Token) =>
+        CopyFrom(CodeManager.Manager.Environments[Token].GlobalsNoLock);
+
+    #endregion
     #region cw
 
     public virtual void cw(object? Object = default, params object?[]? Receivers)
@@ -132,4 +156,6 @@ public record Globals
     }
 
     #endregion
+
+    public override string ToString() => $"{nameof(me)}={me.Name}, {nameof(kv)}={kv}";
 }
